@@ -8,6 +8,7 @@ export const REBAR_AREA: Record<number, number> = {
 interface Props {
   section: SectionInput
   rebar: ReinforcementInput
+  fy?: number
   width?: number
   height?: number
 }
@@ -25,10 +26,12 @@ interface Props {
 //   우측 2열: d' (도심→2단 철근 중심) — 2단 배근 시만
 // ────────────────────────────────────────────────────────────
 export default function SimpleBeamDiagram({
-  section, rebar,
+  section, rebar, fy = 400,
   width = 320, height = 390,
 }: Props) {
   const mono = 'JetBrains Mono, Consolas, monospace'
+  // fy ≤ 300MPa (SD300 이하) → D, 초과 → H
+  const rebarPrefix = fy <= 300 ? 'D' : 'H'
 
   const has2ndRow  = rebar.tension.length >= 2 && (rebar.tension[1]?.count ?? 0) > 0
 
@@ -37,7 +40,9 @@ export default function SimpleBeamDiagram({
   const padL = 38
   const padR = has2ndRow ? 50 : 34
   const padT = 18
-  const padB = 30
+  // 하단: b 치수선(16) + 간격(4) + 철근 레이블 줄수×13
+  const rebarRowCount = rebar.tension.filter((_, i) => i === 0 || (rebar.tension[1]?.count ?? 0) > 0).length
+  const padB = 30 + rebarRowCount * 13
 
   const sw = width - padL - padR
   const sh = height - padT - padB
@@ -125,10 +130,7 @@ export default function SimpleBeamDiagram({
   // 1단 철근 실제 y (레이블용)
   const t1Bars  = tensionBars.filter(b => b.row === 1)
   const t2Bars  = tensionBars.filter(b => b.row === 2)
-  const t1BarCy = t1Bars.length > 0 ? t1Bars[0].cy : dPx
-  const t1BarR  = t1Bars.length > 0 ? t1Bars[0].r  : 4
   const t2BarCy = t2Bars.length > 0 ? t2Bars[0].cy : dPx
-  const t2BarR  = t2Bars.length > 0 ? t2Bars[0].r  : 4
 
   // d' = 2단 배근 시: 상단 ~ 2단 철근 중심 (d 치수선 아래에 연속 표시)
   // 압축철근 있을 때는 좌측에 별도 표시 (기존 방식 유지)
@@ -145,6 +147,22 @@ export default function SimpleBeamDiagram({
     : (tCount > 1 ? Math.round(section.b / tCount) : 0)
   const t2Count = t2Bars.length
   const t2Dia   = tLayer1?.dia ?? tDiaMm
+
+  // ── 하단 철근 레이블 (1열/2열) ────────────────────────────
+  // 표기: "1열 : H22@125 = 1548 mm²"
+  const t1Area = tCount * (REBAR_AREA[tDiaMm] ?? 0)
+  const t1SpacingStr = barSpacingMm > 0 ? `@${barSpacingMm}` : ''
+  const t1Label = tCount > 0
+    ? `1열 : ${rebarPrefix}${tDiaMm}${t1SpacingStr} (${tCount}개) = ${Math.round(t1Area)} mm²`
+    : ''
+  const t2Area = t2Count * (REBAR_AREA[t2Dia] ?? 0)
+  const t2SpacingMm = tLayer1?.inputMode === 'spacing' && (tLayer1?.spacing ?? 0) > 0
+    ? tLayer1.spacing!
+    : (t2Count > 1 ? Math.round(section.b / t2Count) : 0)
+  const t2SpacingStr = t2SpacingMm > 0 ? `@${t2SpacingMm}` : ''
+  const t2Label = has2ndRow && t2Count > 0
+    ? `2열 : ${rebarPrefix}${t2Dia}${t2SpacingStr} (${t2Count}개) = ${Math.round(t2Area)} mm²`
+    : ''
 
   // ── 스터럽 다리수 ───────────────────────────────────────────
   const legs = rebar.stirrup_legs ?? 2
@@ -312,37 +330,26 @@ export default function SimpleBeamDiagram({
         )
       })()}
 
-      {/* ── 1단 인장철근 레이블 ── */}
-      {t1Bars.length > 0 && (() => {
-        const cx = t1Bars.reduce((s, b) => s + b.cx, 0) / t1Bars.length
-        const spacingTxt = tCount > 1 ? `@${barSpacingMm}` : ''
-        const label = `D${tDiaMm}(H${tDiaMm})${spacingTxt}`
-        return (
-          <text x={cx} y={t1BarCy - t1BarR - 5}
-            textAnchor="middle" fill="#1a2040" fontSize="8" fontFamily={mono} fontWeight="600">
-            {label}
-          </text>
-        )
-      })()}
-
-      {/* ── 2단 인장철근 레이블 ── */}
-      {has2ndRow && t2Bars.length > 0 && (() => {
-        const cx = t2Bars.reduce((s, b) => s + b.cx, 0) / t2Bars.length
-        const label = `${t2Count}-D${t2Dia}(H${t2Dia})`
-        return (
-          <text x={cx} y={t2BarCy + t2BarR + 9}
-            textAnchor="middle" fill="#1a2040" fontSize="8" fontFamily={mono} fontWeight="600">
-            {label}
-          </text>
-        )
-      })()}
+      {/* ── 하단 철근 레이블 (b 치수선 아래) ── */}
+      {t1Label && (
+        <text x={ox + drawW / 2} y={bLineY + 24}
+          textAnchor="middle" fill="#1a2040" fontSize="8.5" fontFamily={mono} fontWeight="600">
+          {t1Label}
+        </text>
+      )}
+      {t2Label && (
+        <text x={ox + drawW / 2} y={bLineY + 38}
+          textAnchor="middle" fill={CLR_D2} fontSize="8.5" fontFamily={mono} fontWeight="600">
+          {t2Label}
+        </text>
+      )}
 
       {/* ── 압축철근 레이블 ── */}
       {compressionBars.length > 0 && (() => {
         const firstBar = compressionBars[0]
         const cx  = compressionBars.reduce((s, b) => s + b.cx, 0) / compressionBars.length
         const cnt = rebar.compression[0]?.count ?? 0
-        const label = `${cnt > 0 ? `${cnt}-` : ''}D${cDiaMm}(H${cDiaMm})`
+        const label = `${cnt > 0 ? `${cnt}-` : ''}${rebarPrefix}${cDiaMm}`
         return (
           <text x={cx} y={firstBar.cy + firstBar.r + 9}
             textAnchor="middle" fill="#1a2040" fontSize="8" fontFamily={mono} fontWeight="600">
@@ -353,7 +360,7 @@ export default function SimpleBeamDiagram({
 
       {/* ── 스터럽 레이블 (우측 세로) ── */}
       {stirrupMm > 0 && (() => {
-        const label = `D${rebar.stirrup_dia}@${rebar.stirrup_spacing}-${legs}leg`
+        const label = `${rebarPrefix}${rebar.stirrup_dia}@${rebar.stirrup_spacing}-${legs}leg`
         const lx = ox + drawW * 0.78
         const ly = oy + drawH / 2
         return (

@@ -953,7 +953,7 @@ export default function SimpleBeamPanel() {
           background: sec.b > 0 && sec.h > 0 ? undefined : 'var(--surface-2)',
         }}>
           {sec.b > 0 && sec.h > 0
-            ? <SimpleBeamDiagram section={secD} rebar={reb} width={310} height={340}/>
+            ? <SimpleBeamDiagram section={secD} rebar={reb} fy={mat.fy} width={310} height={370}/>
             : <span style={{ fontSize: '0.75rem', color: 'var(--text-disabled)', fontFamily: 'var(--font-mono)' }}>
                 b, h 값을 입력하면 단면도가 표시됩니다
               </span>
