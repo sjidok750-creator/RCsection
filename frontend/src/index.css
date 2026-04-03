@@ -1,0 +1,139 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+:root {
+  /* ── 앱 컨테이너 ── */
+  --app-max-w:    1640px;
+  --app-shadow:   0 0 60px rgba(0,0,0,0.12);
+
+  /* ── 컬러 팔레트 — 전문 공학용 밝은 테마 ── */
+  --bg-outer:     #d6dbe3;
+  --bg:           #edf0f4;
+  --surface:      #f7f8fa;
+  --surface-2:    #eef0f4;
+  --surface-3:    #e6e9ee;
+
+  --border:       #c8cdd6;
+  --border-light: #d8dce4;
+  --border-dark:  #b0b8c4;
+
+  --primary:      #1a56c4;
+  --primary-bg:   #e8effe;
+  --primary-dim:  #c7d9fb;
+
+  --success:      #1a7a3c;
+  --success-bg:   #e8f5ee;
+  --warning:      #b35c00;
+  --warning-bg:   #fff4e6;
+  --danger:       #c41a1a;
+  --danger-bg:    #fdeaea;
+
+  --text:         #1a1f2e;
+  --text-2:       #3a4155;
+  --text-3:       #6b7490;
+  --text-disabled:#a8b0c2;
+
+  /* ── 폰트 ── */
+  --font-sans:  'Pretendard', 'Apple SD Gothic Neo', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono:  'JetBrains Mono', 'Consolas', monospace;
+
+  /* fluid scale */
+  font-size: clamp(13px, 0.85vw + 0.4rem, 14px);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  height: 100%; width: 100%;
+  background: var(--bg-outer);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+.mono { font-family: var(--font-mono); }
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-dark); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+
+/* ── 전문 공학 입력 스타일 ── */
+input[type="number"],
+input[type="text"],
+select {
+  background: #ffffff;
+  border: 1px solid var(--border-dark);
+  border-radius: 2px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  font-weight: 500;
+  padding: 0.28rem 0.45rem;
+  width: 100%;
+  outline: none;
+  transition: border-color 0.1s, box-shadow 0.1s;
+  height: 1.85rem;
+}
+input:focus, select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(26,86,196,0.12);
+  z-index: 1;
+  position: relative;
+}
+input[type="number"]::-webkit-inner-spin-button {
+  opacity: 0.5;
+  height: 1.4rem;
+}
+select option { background: #fff; color: var(--text); }
+
+label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-2);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+/* ── 버튼 기본 ── */
+button { font-family: inherit; }
+
+/* ── 트리 항목 호버 ── */
+.tree-item:hover { background: var(--surface-3) !important; }
+.tree-item-active { background: var(--primary-bg) !important; }
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.fade-in { animation: fadeIn 0.12s ease; }
+
+@keyframes slideLeft {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+
+/* ── 툴바 드롭다운 ── */
+.toolbar-select {
+  background: #ffffff;
+  border: 1px solid var(--border-dark);
+  border-radius: 2px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 0.22rem 0.5rem;
+  height: 1.7rem;
+  outline: none;
+  cursor: pointer;
+}
+.toolbar-select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(26,86,196,0.12);
+}
+
+/* ── 결과 상태 배지 ── */
+.badge-ok   { background: var(--success); color: #fff; }
+.badge-ng   { background: var(--danger);  color: #fff; }
+.badge-warn { background: var(--warning); color: #fff; }
