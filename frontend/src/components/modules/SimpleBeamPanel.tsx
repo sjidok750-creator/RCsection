@@ -5,7 +5,7 @@ import ResultTable from '../common/ResultTable'
 
 // ── 기본값 ──────────────────────────────────────────────────
 const DEFAULT_MAT: MaterialInput  = { fck: 27, fy: 400, Es: 200000 }
-const DEFAULT_SEC: SectionInput   = { b: 0, h: 0, d: 0, cover: 0 }
+const DEFAULT_SEC: SectionInput   = { b: 0, h: 0, d: 0, cover: 0, coverMode: 'stirrup' }
 const DEFAULT_REB: ReinforcementInput = {
   tension: [{ count: 0, dia: 22, row: 1, inputMode: 'count', spacing: 0 }],
   compression: [],
@@ -517,14 +517,50 @@ export default function SimpleBeamPanel() {
   const [reb, setReb]   = useState<ReinforcementInput>(DEFAULT_REB)
   const [load, setLoad] = useState<LoadInput>(DEFAULT_LOAD)
 
-  // d 자동계산 (KDS 기준)
-  // cover = 콘크리트 외면 ~ 스터럽 외면
-  // d = h - cover - stirrup_dia - tension_bar_dia/2
+  // d 자동계산 (KDS 기준 — 바리뇽 정리, 다단 배근 도심)
+  //
+  // [stirrup 모드] cover = 콘크리트 외면 ~ 스터럽 외면
+  //   각 단 철근 중심(상단기준) = h - cover - stirrup_dia - dia/2 - (row-1)*(dia+25)
+  //
+  // [center 모드] cover = 콘크리트 외면 ~ 1단 인장철근 중심 (d' 직접 입력)
+  //   1단 철근 중심 = h - cover
+  //   2단 철근 중심 = h - cover - (dia+25)  (1단보다 dia+25 위)
+  //
+  // d = Σ(Asi × yi) / ΣAsi
   const autod = useCallback(() => {
     if (sec.h <= 0 || sec.cover <= 0) return 0
-    const tDia = reb.tension[0]?.dia ?? 22
-    return Math.max(0, sec.h - sec.cover - reb.stirrup_dia - tDia / 2)
-  }, [sec.h, sec.cover, reb.stirrup_dia, reb.tension])
+    const mode = sec.coverMode ?? 'stirrup'
+    let sumAd = 0, sumA = 0
+
+    for (const layer of reb.tension) {
+      const n = (layer.inputMode === 'spacing' && (layer.spacing ?? 0) > 0)
+        ? Math.floor(sec.b / layer.spacing!)
+        : layer.count
+      if (n <= 0) continue
+      const Ab = REBAR_AREA[layer.dia] ?? 0
+      const A  = n * Ab
+
+      let yi: number
+      if (mode === 'center') {
+        // cover = 하단면 ~ 1단 철근 중심
+        yi = sec.h - sec.cover - (layer.row - 1) * (layer.dia + 25)
+      } else {
+        // cover = 하단면 ~ 스터럽 외면
+        yi = sec.h - sec.cover - reb.stirrup_dia - layer.dia / 2
+           - (layer.row - 1) * (layer.dia + 25)
+      }
+      sumAd += A * yi
+      sumA  += A
+    }
+
+    if (sumA <= 0) {
+      // 철근 미입력 시 1단 기준 근사
+      const tDia = reb.tension[0]?.dia ?? 22
+      if (mode === 'center') return Math.max(0, sec.h - sec.cover)
+      return Math.max(0, sec.h - sec.cover - reb.stirrup_dia - tDia / 2)
+    }
+    return Math.max(0, Math.round(sumAd / sumA))
+  }, [sec.h, sec.cover, sec.coverMode, sec.b, reb.stirrup_dia, reb.tension])
 
   const secD = { ...sec, d: autod() }
   const result = calcSimpleBeam(mat, secD, reb, load)
@@ -552,9 +588,11 @@ export default function SimpleBeamPanel() {
   }
 
   const tLayer0    = reb.tension[0]
+  const tLayer1    = reb.tension[1]   // 2단 (없으면 undefined)
+  const has2ndRow  = reb.tension.length >= 2
   const tInputMode = tLayer0?.inputMode ?? 'count'
   // 개수모드: spacing=0, 간격모드: count=0
-  const tCount0    = tLayer0?.count ?? 4
+  const tCount0    = tLayer0?.count ?? 0
   const tSpacing0  = tLayer0?.spacing ?? 0
 
 
@@ -609,9 +647,44 @@ export default function SimpleBeamPanel() {
           <Row label="h — 전체높이">
             <NumInput value={sec.h} min={0} step={50} onChange={v => setSec(s => ({ ...s, h: v }))}/>
           </Row>
-          <Row label="피복두께">
+
+          {/* 피복 입력 방식 토글 */}
+          <div style={{
+            display: 'flex', gap: '0', margin: '0.2rem 0.4rem',
+            border: '1px solid var(--border-dark)', borderRadius: '2px', overflow: 'hidden',
+          }}>
+            {([
+              ['stirrup', '스터럽 외면까지'],
+              ['center',  '철근 중심까지'],
+            ] as const).map(([mode, label]) => (
+              <button key={mode}
+                onClick={() => setSec(s => ({ ...s, coverMode: mode, cover: 0 }))}
+                style={{
+                  flex: 1, border: 'none', padding: '0.22rem 0',
+                  fontSize: '0.63rem', fontWeight: 700,
+                  fontFamily: 'var(--font-mono)', cursor: 'pointer',
+                  background: (sec.coverMode ?? 'stirrup') === mode ? 'var(--primary)' : 'var(--surface-2)',
+                  color: (sec.coverMode ?? 'stirrup') === mode ? '#fff' : 'var(--text-3)',
+                  letterSpacing: '0.01em',
+                }}>{label}</button>
+            ))}
+          </div>
+          <Row label={(sec.coverMode ?? 'stirrup') === 'stirrup' ? '피복 (스터럽외면)' : '피복 (철근중심)'}>
             <NumInput value={sec.cover} min={0} step={5} onChange={v => setSec(s => ({ ...s, cover: v }))}/>
           </Row>
+          {/* 피복 모드 설명 */}
+          <div style={{
+            padding: '0.1rem 0.55rem 0.18rem',
+            fontSize: '0.62rem', color: 'var(--text-3)',
+            fontFamily: 'var(--font-mono)',
+            background: 'var(--surface-2)',
+            borderBottom: '1px solid var(--border-light)',
+          }}>
+            {(sec.coverMode ?? 'stirrup') === 'stirrup'
+              ? `※ d = h − cover − D${reb.stirrup_dia} − bar/2`
+              : `※ d = h − cover  (1단 철근 중심 기준)`}
+          </div>
+
           <Row label="d — 유효깊이">
             <div style={{ padding: '0.1rem 0.3rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
               <span style={{ fontSize: '0.88rem', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--primary)' }}>
@@ -693,10 +766,83 @@ export default function SimpleBeamPanel() {
             )}
           </Row>
 
-          <Row label="철근 직경">
+          <Row label="철근 직경 (1단)">
             <SelInput value={tLayer0?.dia ?? 22} options={rebarOptions}
-              onChange={v => setReb(r => ({ ...r, tension: [{ ...r.tension[0], dia: v }] }))}/>
+              onChange={v => setReb(r => ({ ...r, tension: [{ ...r.tension[0], dia: v }, ...r.tension.slice(1)] }))}/>
           </Row>
+
+          {/* 2단 배근 추가/삭제 버튼 */}
+          <div style={{
+            margin: '0.2rem 0.4rem',
+            display: 'flex', gap: '0.3rem',
+          }}>
+            {!has2ndRow ? (
+              <button
+                onClick={() => setReb(r => ({
+                  ...r,
+                  tension: [
+                    r.tension[0],
+                    { count: 0, dia: r.tension[0]?.dia ?? 22, row: 2, inputMode: 'count', spacing: 0 },
+                  ],
+                }))}
+                style={{
+                  flex: 1, border: '1px dashed var(--border-dark)', borderRadius: '2px',
+                  padding: '0.22rem 0', fontSize: '0.65rem', fontWeight: 700,
+                  fontFamily: 'var(--font-mono)', cursor: 'pointer',
+                  background: 'var(--surface-2)', color: 'var(--text-3)',
+                }}>
+                + 2단 배근 추가
+              </button>
+            ) : (
+              <button
+                onClick={() => setReb(r => ({ ...r, tension: [r.tension[0]] }))}
+                style={{
+                  flex: 1, border: '1px solid var(--border-dark)', borderRadius: '2px',
+                  padding: '0.22rem 0', fontSize: '0.65rem', fontWeight: 700,
+                  fontFamily: 'var(--font-mono)', cursor: 'pointer',
+                  background: '#fdf0f0', color: 'var(--danger)',
+                }}>
+                × 2단 배근 제거
+              </button>
+            )}
+          </div>
+
+          {/* 2단 배근 입력 */}
+          {has2ndRow && (
+            <>
+              <div style={{
+                padding: '0.18rem 0.55rem',
+                fontSize: '0.63rem', fontWeight: 700,
+                color: 'var(--text-3)', fontFamily: 'var(--font-mono)',
+                background: 'var(--surface-3)',
+                borderTop: '1px solid var(--border-light)',
+                borderBottom: '1px solid var(--border-light)',
+              }}>2단 철근 (row 2)</div>
+              <Row label="2단 개수 (개)">
+                <NumInput value={tLayer1?.count ?? 0} min={0}
+                  onChange={v => setReb(r => ({
+                    ...r,
+                    tension: [r.tension[0], { ...r.tension[1], count: v, inputMode: 'count', spacing: 0 }],
+                  }))}/>
+              </Row>
+              <Row label="2단 직경">
+                <SelInput value={tLayer1?.dia ?? (tLayer0?.dia ?? 22)} options={rebarOptions}
+                  onChange={v => setReb(r => ({
+                    ...r,
+                    tension: [r.tension[0], { ...r.tension[1], dia: v }],
+                  }))}/>
+              </Row>
+              <div style={{
+                padding: '0.1rem 0.55rem 0.15rem',
+                fontSize: '0.62rem', color: 'var(--text-3)',
+                fontFamily: 'var(--font-mono)',
+                background: 'var(--surface-2)',
+                borderBottom: '1px solid var(--border-light)',
+              }}>
+                ※ d (도심) = 바리뇽 정리로 자동계산
+              </div>
+            </>
+          )}
 
           <GroupHeader title="Shear Reinforcement" sub="스터럽"/>
           <Row label="스터럽 직경">

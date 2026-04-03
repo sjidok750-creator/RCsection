@@ -27,11 +27,16 @@ export interface MaterialInput {
 }
 
 // ─── 단면 ─────────────────────────────────────────────────
+export type CoverMode = 'stirrup' | 'center'
+// stirrup: 피복 = 콘크리트 외면 ~ 스터럽 외면 (표준 입력)
+// center : 피복 = 콘크리트 외면 ~ 인장철근 중심 (d' 직접 입력)
+
 export interface SectionInput {
   b: number          // 폭 (mm)
   h: number          // 전체 높이 (mm)
-  d: number          // 유효 깊이 (mm)  — 자동계산 가능
+  d: number          // 유효 깊이 (mm)  — 자동계산
   cover: number      // 피복 두께 (mm)
+  coverMode?: CoverMode  // 피복 입력 방식 (기본: 'stirrup')
 }
 
 // ─── 철근 ─────────────────────────────────────────────────
