@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import type { MaterialInput, SectionInput, ReinforcementInput, LoadInput, CheckResult, CheckItem, CalcLine } from '../../types'
+import { useResponsive } from '../../hooks/useResponsive'
 import SimpleBeamDiagram, { REBAR_AREA } from '../diagrams/SimpleBeamDiagram'
 import ResultTable from '../common/ResultTable'
 
@@ -512,10 +513,12 @@ function StatusBadge({ status }: { status: 'OK' | 'NG' | 'WARN' }) {
 
 // ── 메인 패널 ───────────────────────────────────────────────
 export default function SimpleBeamPanel() {
+  const { isMobile, isCompact } = useResponsive()
   const [mat, setMat]   = useState<MaterialInput>(DEFAULT_MAT)
   const [sec, setSec]   = useState<SectionInput>(DEFAULT_SEC)
   const [reb, setReb]   = useState<ReinforcementInput>(DEFAULT_REB)
   const [load, setLoad] = useState<LoadInput>(DEFAULT_LOAD)
+  const [activeTab, setActiveTab] = useState<'input' | 'section' | 'result'>('input')
 
   // d 자동계산 (KDS 기준 — 바리뇽 정리, 다단 배근 도심)
   //
@@ -596,16 +599,49 @@ export default function SimpleBeamPanel() {
   const tSpacing0  = tLayer0?.spacing ?? 0
 
 
+  // ── 모바일/태블릿: 탭 전환 바 ──
+  const TabBar = () => (
+    <div style={{
+      display: 'flex', borderBottom: '2px solid var(--border-dark)',
+      background: 'var(--surface-3)', flexShrink: 0,
+    }}>
+      {([['input', '입력'], ['section', '단면도'], ['result', '결과']] as const).map(([id, label]) => (
+        <button key={id}
+          onClick={() => setActiveTab(id)}
+          style={{
+            flex: 1, border: 'none', padding: '0.45rem 0',
+            fontSize: '0.75rem', fontWeight: 700,
+            fontFamily: 'var(--font-mono)', cursor: 'pointer',
+            background: activeTab === id ? 'var(--primary)' : 'transparent',
+            color: activeTab === id ? '#fff' : 'var(--text-3)',
+            borderBottom: activeTab === id ? '2px solid var(--primary)' : '2px solid transparent',
+          }}>
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+
+  // ── 패널 표시 여부 (데스크탑=항상, 모바일/태블릿=탭) ──
+  const showInput   = !isCompact || activeTab === 'input'
+  const showSection = !isCompact || activeTab === 'section'
+  const showResult  = !isCompact || activeTab === 'result'
+
   return (
-    <div style={{ display: 'flex', flex: 1, height: '100%', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', overflow: 'hidden' }}>
+
+      {/* 모바일/태블릿 탭 바 */}
+      {isCompact && <TabBar />}
+
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 
       {/* ══ 좌측: 입력 패널 (트리형) ══ */}
       <div style={{
-        width: 'clamp(240px, 26%, 320px)',
+        width: isCompact ? '100%' : 'clamp(240px, 26%, 320px)',
         flexShrink: 0,
-        display: 'flex',
+        display: showInput ? 'flex' : 'none',
         flexDirection: 'column',
-        borderRight: '1px solid var(--border-dark)',
+        borderRight: isCompact ? 'none' : '1px solid var(--border-dark)',
         background: 'var(--surface)',
         overflow: 'hidden',
       }}>
@@ -918,11 +954,11 @@ export default function SimpleBeamPanel() {
 
       {/* ══ 중앙: 단면도 + Design Parameters ══ */}
       <div style={{
-        width: 'clamp(240px, 30%, 360px)',
+        width: isCompact ? '100%' : 'clamp(240px, 30%, 360px)',
         flexShrink: 0,
-        display: 'flex',
+        display: showSection ? 'flex' : 'none',
         flexDirection: 'column',
-        borderRight: '1px solid var(--border-dark)',
+        borderRight: isCompact ? 'none' : '1px solid var(--border-dark)',
         background: 'var(--bg)',
         overflow: 'hidden',
       }}>
@@ -1029,7 +1065,7 @@ export default function SimpleBeamPanel() {
       </div>
 
       {/* ══ 우측: 검토결과 (항상 표시) ══ */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg)' }}>
+      <div style={{ flex: 1, display: showResult ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg)' }}>
 
         {/* 헤더 */}
         <div style={{
@@ -1078,6 +1114,7 @@ export default function SimpleBeamPanel() {
           <ResultTable items={result.items} overallStatus={result.overallStatus}/>
         </div>
       </div>
+      </div>{/* 3열 컨테이너 닫기 */}
     </div>
   )
 }

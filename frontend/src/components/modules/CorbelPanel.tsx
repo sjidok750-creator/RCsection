@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { CheckItem } from '../../types'
+import { useResponsive } from '../../hooks/useResponsive'
 import ResultTable from '../common/ResultTable'
 
 function Field({ label, value, unit, min = 0, step = 1, onChange }: {
@@ -141,6 +142,7 @@ function CorbelDiagram({ b, h, a }: { b: number; h: number; a: number }) {
 }
 
 export default function CorbelPanel() {
+  const { isCompact } = useResponsive()
   const [fck, setFck] = useState(27); const [fy, setFy] = useState(400)
   const [b, setB] = useState(400); const [h, setH] = useState(600); const [d, setD] = useState(540)
   const [Vu, setVu] = useState(300); const [Nuc, setNuc] = useState(60); const [a, setA] = useState(200)
@@ -152,8 +154,8 @@ export default function CorbelPanel() {
   const overallColor = hasNG ? 'var(--danger)' : 'var(--success)'
 
   return (
-    <div style={{ display: 'flex', flex: 1, height: '100%', overflow: 'hidden' }}>
-      <div style={{ width: 'clamp(210px, 32%, 340px)', flexShrink: 0, display: 'flex', flexDirection: 'column', borderRight: '1.5px solid var(--border)', background: 'var(--surface)' }}>
+    <div style={{ display: 'flex', flexDirection: isCompact ? 'column' : 'row', flex: 1, height: '100%', overflow: isCompact ? 'auto' : 'hidden' }}>
+      <div style={{ width: isCompact ? '100%' : 'clamp(210px, 32%, 340px)', flexShrink: 0, display: 'flex', flexDirection: 'column', borderRight: isCompact ? 'none' : '1.5px solid var(--border)', borderBottom: isCompact ? '1.5px solid var(--border)' : 'none', background: 'var(--surface)' }}>
         <div style={{ padding: '0.7rem 1rem', borderBottom: '1px solid var(--border-light)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text)' }}>단 면 도</span>
           <span style={{ fontSize: '0.75rem', fontWeight: 700, color: overallColor, background: hasNG ? '#fef2f2' : '#f0fdf4', borderRadius: '6px', padding: '0.18rem 0.6rem', fontFamily: 'var(--font-mono)', border: `1px solid ${overallColor}44` }}>{overall}</span>

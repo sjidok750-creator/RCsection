@@ -11,15 +11,6 @@ export default function ResultTable({ items, overallStatus }: Props) {
   const statusColor = isNG ? 'var(--danger)' : overallStatus === 'WARN' ? 'var(--warning)' : 'var(--success)'
   const mono: React.CSSProperties = { fontFamily: 'var(--font-mono)' }
 
-  const colStyle: React.CSSProperties = {
-    fontSize: '0.65rem',
-    fontWeight: 700,
-    color: 'var(--text-3)',
-    textTransform: 'uppercase',
-    letterSpacing: '0.06em',
-    padding: '0.32rem 0.5rem',
-  }
-
   return (
     <div style={{
       border: '1px solid var(--border-dark)',
@@ -27,19 +18,6 @@ export default function ResultTable({ items, overallStatus }: Props) {
       overflow: 'hidden',
       background: 'var(--surface)',
     }}>
-      {/* 헤더 */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: '12rem 1fr 1fr 5.5rem 4.5rem',
-        background: 'var(--surface-3)',
-        borderBottom: '1px solid var(--border-dark)',
-        alignItems: 'center',
-      }}>
-        {['검토 항목', '요구값  Demand', '설계강도  Capacity', 'S.F', '판정'].map((h, i) => (
-          <span key={i} style={colStyle}>{h}</span>
-        ))}
-      </div>
-
       {/* 각 행 */}
       <div>
         {items.map((item, i) => (

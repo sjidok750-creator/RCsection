@@ -6,8 +6,9 @@ import Header from './components/layout/Header'
 import MobileNav from './components/layout/MobileNav'
 import SimpleBeamPanel from './components/modules/SimpleBeamPanel'
 import DeepBeamPanel from './components/modules/DeepBeamPanel'
-import CorbelPanel from './components/modules/CorbelPanel'
 import SlabPanel from './components/modules/SlabPanel'
+import ColumnPanel from './components/modules/ColumnPanel'
+import WallPanel from './components/modules/WallPanel'
 
 // 각 패널을 항상 마운트하고 display로 show/hide → 상태 유지
 function ModulePanel({ id }: { id: ModuleId }) {
@@ -17,10 +18,10 @@ function ModulePanel({ id }: { id: ModuleId }) {
     <>
       <div style={show('simple-beam')}><SimpleBeamPanel /></div>
       <div style={show('deep-beam')}><DeepBeamPanel /></div>
-      <div style={show('corbel')}><CorbelPanel /></div>
       <div style={show('slab-one-way')}><SlabPanel moduleId="slab-one-way" /></div>
       <div style={show('slab-two-way')}><SlabPanel moduleId="slab-two-way" /></div>
-      <div style={show('slab-punching')}><SlabPanel moduleId="slab-punching" /></div>
+      <div style={show('rc-column')}><ColumnPanel /></div>
+      <div style={show('rc-wall')}><WallPanel /></div>
     </>
   )
 }

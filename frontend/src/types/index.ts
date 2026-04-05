@@ -5,10 +5,10 @@ export type DesignCode = 'KDS' | 'ACI'
 export type ModuleId =
   | 'simple-beam'
   | 'deep-beam'
-  | 'corbel'
   | 'slab-one-way'
   | 'slab-two-way'
-  | 'slab-punching'
+  | 'rc-column'
+  | 'rc-wall'
 
 export interface ModuleInfo {
   id: ModuleId

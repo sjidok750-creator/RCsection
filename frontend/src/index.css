@@ -37,8 +37,8 @@
   --font-sans:  'Pretendard', 'Apple SD Gothic Neo', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono:  'JetBrains Mono', 'Consolas', monospace;
 
-  /* fluid scale */
-  font-size: clamp(13px, 0.85vw + 0.4rem, 14px);
+  /* fluid scale — 작은 화면도 가독성 유지 */
+  font-size: clamp(12px, 0.7vw + 0.35rem, 14px);
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
