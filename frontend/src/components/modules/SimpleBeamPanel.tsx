@@ -985,33 +985,49 @@ export default function SimpleBeamPanel() {
           <StatusBadge status={result.overallStatus}/>
         </div>
 
-        {/* ── 휨 단면 해석도 (Bending Section Analysis) ── */}
-        <div style={{
-          flex: 1,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          overflow: 'auto',
-          minHeight: 0,
-          background: '#ffffff',
-          padding: '0.25rem',
-        }}>
-          {sec.b > 0 && sec.h > 0 && secD.d > 0 && cDiag > 0
-            ? <div style={{ width: '100%', aspectRatio: '620 / 520', maxWidth: '620px', flexShrink: 0 }}>
-                <StrainForceDiagram
-                  b={sec.b} h={sec.h} d={secD.d}
-                  c={cDiag} a={aDiag} As={As}
-                  Et={etDiag}
-                  width={620} height={520}
-                />
-              </div>
-            : <div style={{
-                display: 'flex', flexDirection: 'column',
-                alignItems: 'center', justifyContent: 'center',
-                width: '100%', height: '100%',
-                background: 'var(--surface-2)',
-              }}>
-                <SimpleBeamDiagram section={secD} rebar={reb} fy={mat.fy} width={310} height={320}/>
-              </div>
-          }
+        {/* ── 상/하 2분할 래퍼 ── */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+          {/* 상단: 단면도 (Section View) */}
+          <div style={{
+            flex: 1,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '0.4rem 0.4rem 0.2rem',
+            overflow: 'hidden',
+            minHeight: 0,
+            background: sec.b > 0 && sec.h > 0 ? undefined : 'var(--surface-2)',
+          }}>
+            {sec.b > 0 && sec.h > 0
+              ? <SimpleBeamDiagram section={secD} rebar={reb} fy={mat.fy} width={310} height={340}/>
+              : <span style={{ fontSize: '0.75rem', color: 'var(--text-disabled)', fontFamily: 'var(--font-mono)' }}>
+                  b, h 값을 입력하면 단면도가 표시됩니다
+                </span>
+            }
+          </div>
+
+          {/* 구분선 */}
+          <div style={{ height: '1px', background: 'var(--border-dark)', flexShrink: 0 }}/>
+
+          {/* 하단: 휨단면 해석도 (Bending Section Analysis) */}
+          <div style={{
+            flex: 1,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            overflow: 'hidden',
+            minHeight: 0,
+            background: '#ffffff',
+            padding: '0.25rem',
+          }}>
+            {sec.b > 0 && sec.h > 0 && secD.d > 0 && cDiag > 0
+              ? <div style={{ width: '100%', aspectRatio: '620 / 520', maxWidth: '620px', flexShrink: 0 }}>
+                  <StrainForceDiagram
+                    b={sec.b} h={sec.h} d={secD.d}
+                    c={cDiag} a={aDiag} As={As}
+                    Et={etDiag}
+                    width={620} height={520}
+                  />
+                </div>
+              : null
+            }
+          </div>
         </div>
 
         {/* Design Parameters 컴팩트 테이블 */}
