@@ -61,7 +61,7 @@ export default function SimpleBeamDiagram({
   const coverMm   = section.cover
   const stirrupMm = rebar.stirrup_dia
   const barScale  = Math.min(scaleX, scaleY)
-  const barR = (dia: number) => Math.max((dia / 2) * barScale * 0.78, 3.2)
+  const barR = (dia: number) => Math.max((dia / 2) * barScale * 0.48, 2.4)
 
   // ── 인장철근 개수 결정 ──────────────────────────────────────
   const resolveBarCount = (layer: typeof rebar.tension[0]): number => {
