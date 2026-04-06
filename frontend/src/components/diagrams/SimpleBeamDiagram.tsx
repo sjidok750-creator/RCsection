@@ -391,7 +391,7 @@ interface StrainForceProps {
 }
 
 export function StrainForceDiagram({
-  b, h, d, c, a, As,
+  b, h, d, c, a, As: _As,
   Et,
   width = 620, height = 300,
 }: StrainForceProps) {
