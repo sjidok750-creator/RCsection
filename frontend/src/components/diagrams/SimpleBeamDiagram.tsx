@@ -27,7 +27,7 @@ interface Props {
 // ────────────────────────────────────────────────────────────
 export default function SimpleBeamDiagram({
   section, rebar, fy = 400,
-  width = 320, height = 390,
+  width = 500, height = 520,
 }: Props) {
   const mono = 'JetBrains Mono, Consolas, monospace'
   // fy ≤ 300MPa (SD300 이하) → D, 초과 → H
@@ -35,12 +35,12 @@ export default function SimpleBeamDiagram({
 
   const has2ndRow  = rebar.tension.length >= 2 && (rebar.tension[1]?.count ?? 0) > 0
 
-  // ── 레이아웃 패딩 (최소화하여 꽉 차게) ────────────────────
-  const padL = 42
-  const padR = has2ndRow ? 54 : 38
-  const padT = 10
+  // ── 레이아웃 패딩 ────────────────────────────────────────
+  const padL = 52
+  const padR = has2ndRow ? 68 : 50
+  const padT = 12
   const rebarRowCount = rebar.tension.filter((_, i) => i === 0 || (rebar.tension[1]?.count ?? 0) > 0).length
-  const padB = 34 + rebarRowCount * 15
+  const padB = 42 + rebarRowCount * 20
 
   const sw = width - padL - padR
   const sh = height - padT - padB
@@ -172,11 +172,11 @@ export default function SimpleBeamDiagram({
   }
 
   // ── 치수선 x 좌표 ───────────────────────────────────────────
-  const hLineX   = ox - padL + 8          // h 치수선 (최좌측)
-  const dLineX   = ox + drawW + 10         // d 치수선 (우측 1열)
-  const dPLX     = ox + drawW + 28         // d' 치수선 (우측 2열, 2단 배근 시)
-  const dPLX_L   = ox - 14                 // d' 치수선 (좌측, 압축철근 있을 때)
-  const bLineY   = oy + drawH + 16         // b 치수선 (하단)
+  const hLineX   = ox - padL + 10          // h 치수선 (최좌측)
+  const dLineX   = ox + drawW + 14         // d 치수선 (우측 1열)
+  const dPLX     = ox + drawW + 38         // d' 치수선 (우측 2열, 2단 배근 시)
+  const dPLX_L   = ox - 18                 // d' 치수선 (좌측, 압축철근 있을 때)
+  const bLineY   = oy + drawH + 20         // b 치수선 (하단)
 
   const CLR_DARK = '#1a2a4a'
   const CLR_D2   = '#3a5080'   // d' 색 (2단)
@@ -247,7 +247,7 @@ export default function SimpleBeamDiagram({
       <line x1={hLineX} y1={oy} x2={hLineX} y2={oy+drawH}
         stroke={CLR_GRAY} strokeWidth="0.9" markerStart="url(#arG0)" markerEnd="url(#arG1)"/>
       <text x={hLineX} y={oy+drawH/2} textAnchor="middle" fill={CLR_GRAY}
-        fontSize="12" fontFamily={mono} fontWeight="700"
+        fontSize="15" fontFamily={mono} fontWeight="700"
         transform={`rotate(-90,${hLineX},${oy+drawH/2})`}>h={section.h}</text>
 
       {/* ── d 치수선 (우측 1열: 상단 → 도심) ── */}
@@ -257,8 +257,8 @@ export default function SimpleBeamDiagram({
           <line x1={ox+drawW} y1={dPx}  x2={dLineX+2} y2={dPx}  stroke="#9ba3b2" strokeWidth="0.5" strokeDasharray="2 1.5"/>
           <line x1={dLineX} y1={oy} x2={dLineX} y2={dPx}
             stroke={CLR_DARK} strokeWidth="1.0" markerStart="url(#arD0)" markerEnd="url(#arD1)"/>
-          <text x={dLineX+5} y={(oy+dPx)/2+5}
-            fill={CLR_DARK} fontSize="14" fontFamily={mono} fontWeight="800" textAnchor="start">d</text>
+          <text x={dLineX+6} y={(oy+dPx)/2+6}
+            fill={CLR_DARK} fontSize="18" fontFamily={mono} fontWeight="800" textAnchor="start">d</text>
         </>
       )}
 
@@ -273,8 +273,8 @@ export default function SimpleBeamDiagram({
           <line x1={dPLX} y1={dPx} x2={dPLX} y2={t2BarCy}
             stroke={CLR_D2} strokeWidth="0.9" markerStart="url(#arD20)" markerEnd="url(#arD21)"/>
           {/* 레이블 */}
-          <text x={dPLX+5} y={(dPx+t2BarCy)/2+5}
-            fill={CLR_D2} fontSize="12" fontFamily={mono} fontWeight="700" textAnchor="start">d'</text>
+          <text x={dPLX+6} y={(dPx+t2BarCy)/2+6}
+            fill={CLR_D2} fontSize="15" fontFamily={mono} fontWeight="700" textAnchor="start">d'</text>
         </>
       )}
 
@@ -285,8 +285,8 @@ export default function SimpleBeamDiagram({
           <line x1={ox} y1={dPrimePx_comp} x2={dPLX_L-2} y2={dPrimePx_comp} stroke="#9ba3b2" strokeWidth="0.4" strokeDasharray="2 1.5"/>
           <line x1={dPLX_L} y1={oy} x2={dPLX_L} y2={dPrimePx_comp}
             stroke="#7a6030" strokeWidth="0.9" markerStart="url(#arD20)" markerEnd="url(#arD21)"/>
-          <text x={dPLX_L-3} y={(oy+dPrimePx_comp)/2+5}
-            fill="#7a6030" fontSize="12" fontFamily={mono} fontWeight="700" textAnchor="end">d'</text>
+          <text x={dPLX_L-4} y={(oy+dPrimePx_comp)/2+6}
+            fill="#7a6030" fontSize="15" fontFamily={mono} fontWeight="700" textAnchor="end">d'</text>
         </>
       )}
 
@@ -295,8 +295,8 @@ export default function SimpleBeamDiagram({
       <line x1={ox+drawW}  y1={oy+drawH} x2={ox+drawW}  y2={bLineY+2} stroke="#9ba3b2" strokeWidth="0.45" strokeDasharray="2 1.5"/>
       <line x1={ox} y1={bLineY} x2={ox+drawW} y2={bLineY}
         stroke={CLR_GRAY} strokeWidth="0.9" markerStart="url(#arG0)" markerEnd="url(#arG1)"/>
-      <text x={ox+drawW/2} y={bLineY+13}
-        textAnchor="middle" fill={CLR_GRAY} fontSize="12" fontFamily={mono} fontWeight="700">
+      <text x={ox+drawW/2} y={bLineY+16}
+        textAnchor="middle" fill={CLR_GRAY} fontSize="15" fontFamily={mono} fontWeight="700">
         b={section.b}
       </text>
 
@@ -330,14 +330,14 @@ export default function SimpleBeamDiagram({
 
       {/* ── 하단 철근 레이블 (b 치수선 아래) ── */}
       {t1Label && (
-        <text x={ox + drawW / 2} y={bLineY + 26}
-          textAnchor="middle" fill="#1a2040" fontSize="10" fontFamily={mono} fontWeight="700">
+        <text x={ox + drawW / 2} y={bLineY + 34}
+          textAnchor="middle" fill="#1a2040" fontSize="13" fontFamily={mono} fontWeight="700">
           {t1Label}
         </text>
       )}
       {t2Label && (
-        <text x={ox + drawW / 2} y={bLineY + 42}
-          textAnchor="middle" fill={CLR_D2} fontSize="10" fontFamily={mono} fontWeight="700">
+        <text x={ox + drawW / 2} y={bLineY + 54}
+          textAnchor="middle" fill={CLR_D2} fontSize="13" fontFamily={mono} fontWeight="700">
           {t2Label}
         </text>
       )}
@@ -349,8 +349,8 @@ export default function SimpleBeamDiagram({
         const cnt = rebar.compression[0]?.count ?? 0
         const label = `${cnt > 0 ? `${cnt}-` : ''}${rebarPrefix}${cDiaMm}`
         return (
-          <text x={cx} y={firstBar.cy + firstBar.r + 11}
-            textAnchor="middle" fill="#1a2040" fontSize="10" fontFamily={mono} fontWeight="700">
+          <text x={cx} y={firstBar.cy + firstBar.r + 14}
+            textAnchor="middle" fill="#1a2040" fontSize="13" fontFamily={mono} fontWeight="700">
             {label}
           </text>
         )
@@ -362,7 +362,7 @@ export default function SimpleBeamDiagram({
         const lx = ox + drawW * 0.78
         const ly = oy + drawH / 2
         return (
-          <text x={lx} y={ly} fill="#1a6030" fontSize="9" fontFamily={mono} fontWeight="700"
+          <text x={lx} y={ly} fill="#1a6030" fontSize="11" fontFamily={mono} fontWeight="700"
             textAnchor="middle" transform={`rotate(-90,${lx},${ly})`}>{label}</text>
         )
       })()}
@@ -391,7 +391,7 @@ interface StrainForceProps {
 export function StrainForceDiagram({
   b, h, d, c, a, As: _As,
   Et,
-  width = 620, height = 350,
+  width = 700, height = 420,
 }: StrainForceProps) {
   // ── 폰트 / 색상 ────────────────────────────────────────────
   const serif = 'Times New Roman, Georgia, serif'
@@ -400,12 +400,12 @@ export function StrainForceDiagram({
   const GREY  = '#bbbbbb'
 
   // ══════════════════════════════════════════════════════════
-  // 레이아웃: viewBox = 620 × H (Strain + Stress Block 2그림)
-  //   titleH : 제목 영역
+  // 레이아웃: viewBox = 700 × 420 (Strain + Stress Block 2그림)
+  //   titleH : 제목 영역 (충분한 여백)
   //   topH   : Strain Diagram | Stress Block & Forces
   // ══════════════════════════════════════════════════════════
   const W = width
-  const titleH = 56
+  const titleH = 60
   const topH   = height - titleH
   const H = height
 
@@ -413,14 +413,12 @@ export function StrainForceDiagram({
 
   // ── 상단 좌우 분할 ────────────────────────────────────────
   const topY = titleH
-  const midX = Math.round(W * 0.48)   // 좌측(Strain)이 약간 넓게
+  const midX = Math.round(W * 0.46)   // 좌측(Strain)이 약간 넓게
 
   // ══════════════════════════════════════════════════════════
-  // 상단 우: 세로 단면 (b×h 실제 비율)
-  //   보 단면은 보통 h > b (세로로 긺)
-  //   픽셀: 가용높이에 맞추고, 폭은 b/h 비율로 계산
+  // 상단 우: 세로 단면 (이미지 개념, 폭 제한)
   // ══════════════════════════════════════════════════════════
-  const padT2 = 32, padB2 = 24, padL2 = 36, padR2 = 56
+  const padT2 = 38, padB2 = 32, padL2 = 44, padR2 = 64
   const vAvailH = topH - padT2 - padB2
   const vAvailW = W - midX - padL2 - padR2
 
@@ -445,7 +443,7 @@ export function StrainForceDiagram({
   //   0-축은 오른쪽, 삼각형은 왼쪽으로 뻗음
   //   세로 높이는 세로 단면과 동일하게 정렬
   // ══════════════════════════════════════════════════════════
-  const padL1 = 10, padR1 = 44, padT1 = padT2
+  const padL1 = 14, padR1 = 52, padT1 = padT2
   const strH  = vSecH   // 세로 단면과 동일 높이 → 점선 정렬
   const strX0 = midX - padR1        // 0-축 x
   const strY0 = topY + padT1        // 상단 y (세로 단면 상단과 같음)
@@ -549,7 +547,7 @@ export function StrainForceDiagram({
 
         {/* c 치수선 (우측 0축 오른쪽, 상단~중립축) */}
         {(() => {
-          const dx = strX0 + 20
+          const dx = strX0 + 24
           const AH = 5, AW = 3.5
           return (
             <g>
@@ -568,12 +566,12 @@ export function StrainForceDiagram({
 
         {/* d 치수선 (우측, c 치수선 오른쪽) */}
         {(() => {
-          const dx = strX0 + 38
+          const dx = strX0 + 48
           const AH = 5, AW = 3.5
           return (
             <g>
-              <line x1={strX0 + 22} y1={strY0} x2={dx + 2} y2={strY0} stroke={INK2} strokeWidth="0.5" strokeDasharray="2 1.5"/>
-              <line x1={strX0 + 22} y1={strDY} x2={dx + 2} y2={strDY} stroke={INK2} strokeWidth="0.5" strokeDasharray="2 1.5"/>
+              <line x1={strX0 + 28} y1={strY0} x2={dx + 2} y2={strY0} stroke={INK2} strokeWidth="0.5" strokeDasharray="2 1.5"/>
+              <line x1={strX0 + 28} y1={strDY} x2={dx + 2} y2={strDY} stroke={INK2} strokeWidth="0.5" strokeDasharray="2 1.5"/>
               {strDpx > AH * 2 + 4 && <>
                 <line x1={dx} y1={strY0 + AH} x2={dx} y2={strDY - AH} stroke={INK} strokeWidth="0.9"/>
                 <polygon points={`${dx},${strY0} ${dx-AW},${strY0+AH} ${dx+AW},${strY0+AH}`} fill={INK}/>
@@ -695,7 +693,7 @@ export function StrainForceDiagram({
 
         {/* a 치수선 (왼쪽) */}
         {(() => {
-          const dx = vSecX - 16
+          const dx = vSecX - 20
           const AH = 4, AW = 3
           return (
             <g>
@@ -704,32 +702,32 @@ export function StrainForceDiagram({
               <line x1={dx} y1={vSecY + AH} x2={dx} y2={vAY - AH} stroke={INK} strokeWidth="0.9"/>
               <polygon points={`${dx},${vSecY} ${dx-AW},${vSecY+AH} ${dx+AW},${vSecY+AH}`} fill={INK}/>
               <polygon points={`${dx},${vAY} ${dx-AW},${vAY-AH} ${dx+AW},${vAY-AH}`} fill={INK}/>
-              <text x={dx - 5} y={(vSecY + vAY) / 2 + 5}
-                textAnchor="end" fontSize="15" fontFamily={serif} fontStyle="italic" fill={INK}>a</text>
+              <text x={dx - 6} y={(vSecY + vAY) / 2 + 5}
+                textAnchor="end" fontSize="16" fontFamily={serif} fontStyle="italic" fill={INK}>a</text>
             </g>
           )
         })()}
 
         {/* c 치수선 (왼쪽, a 바깥) */}
         {(() => {
-          const dx = vSecX - 30
+          const dx = vSecX - 38
           const AH = 4, AW = 3
           return (
             <g>
-              <line x1={vSecX - 14} y1={vSecY} x2={dx - 2} y2={vSecY} stroke={INK2} strokeWidth="0.5" strokeDasharray="2 1.5"/>
-              <line x1={vSecX - 14} y1={vCY}   x2={dx - 2} y2={vCY}   stroke={INK2} strokeWidth="0.5" strokeDasharray="2 1.5"/>
+              <line x1={vSecX - 18} y1={vSecY} x2={dx - 2} y2={vSecY} stroke={INK2} strokeWidth="0.5" strokeDasharray="2 1.5"/>
+              <line x1={vSecX - 18} y1={vCY}   x2={dx - 2} y2={vCY}   stroke={INK2} strokeWidth="0.5" strokeDasharray="2 1.5"/>
               <line x1={dx} y1={vSecY + AH} x2={dx} y2={vCY - AH} stroke={INK} strokeWidth="0.9"/>
               <polygon points={`${dx},${vSecY} ${dx-AW},${vSecY+AH} ${dx+AW},${vSecY+AH}`} fill={INK}/>
               <polygon points={`${dx},${vCY} ${dx-AW},${vCY-AH} ${dx+AW},${vCY-AH}`} fill={INK}/>
-              <text x={dx - 5} y={(vSecY + vCY) / 2 + 5}
-                textAnchor="end" fontSize="15" fontFamily={serif} fontStyle="italic" fill={INK}>c</text>
+              <text x={dx - 6} y={(vSecY + vCY) / 2 + 5}
+                textAnchor="end" fontSize="16" fontFamily={serif} fontStyle="italic" fill={INK}>c</text>
             </g>
           )
         })()}
 
         {/* d 치수선 (오른쪽) */}
         {(() => {
-          const dx = vSecX + vSecW + 16
+          const dx = vSecX + vSecW + 20
           const AH = 4, AW = 3
           return (
             <g>
@@ -738,25 +736,25 @@ export function StrainForceDiagram({
               <line x1={dx} y1={vSecY + AH} x2={dx} y2={vDY - AH} stroke={INK} strokeWidth="0.9"/>
               <polygon points={`${dx},${vSecY} ${dx-AW},${vSecY+AH} ${dx+AW},${vSecY+AH}`} fill={INK}/>
               <polygon points={`${dx},${vDY} ${dx-AW},${vDY-AH} ${dx+AW},${vDY-AH}`} fill={INK}/>
-              <text x={dx + 5} y={(vSecY + vDY) / 2 + 5}
-                fontSize="15" fontFamily={serif} fontStyle="italic" fill={INK}>d</text>
+              <text x={dx + 6} y={(vSecY + vDY) / 2 + 5}
+                fontSize="16" fontFamily={serif} fontStyle="italic" fill={INK}>d</text>
             </g>
           )
         })()}
 
         {/* z = jd 치수선 (오른쪽, d 바깥) */}
         {(() => {
-          const dx = vSecX + vSecW + 34
+          const dx = vSecX + vSecW + 44
           const AH = 4, AW = 3
           return (
             <g>
-              <line x1={vSecX + vSecW + 18} y1={vCcY} x2={dx + 2} y2={vCcY} stroke={INK2} strokeWidth="0.5" strokeDasharray="2 1.5"/>
-              <line x1={vSecX + vSecW + 18} y1={vDY}  x2={dx + 2} y2={vDY}  stroke={INK2} strokeWidth="0.5" strokeDasharray="2 1.5"/>
+              <line x1={vSecX + vSecW + 24} y1={vCcY} x2={dx + 2} y2={vCcY} stroke={INK2} strokeWidth="0.5" strokeDasharray="2 1.5"/>
+              <line x1={vSecX + vSecW + 24} y1={vDY}  x2={dx + 2} y2={vDY}  stroke={INK2} strokeWidth="0.5" strokeDasharray="2 1.5"/>
               <line x1={dx} y1={vCcY + AH} x2={dx} y2={vDY - AH} stroke={INK} strokeWidth="0.9"/>
               <polygon points={`${dx},${vCcY} ${dx-AW},${vCcY+AH} ${dx+AW},${vCcY+AH}`} fill={INK}/>
               <polygon points={`${dx},${vDY} ${dx-AW},${vDY-AH} ${dx+AW},${vDY-AH}`} fill={INK}/>
-              <text x={dx + 5} y={(vCcY + vDY) / 2 + 5}
-                fontSize="14" fontFamily={serif} fontStyle="italic" fill={INK}>
+              <text x={dx + 6} y={(vCcY + vDY) / 2 + 5}
+                fontSize="15" fontFamily={serif} fontStyle="italic" fill={INK}>
                 z ≅ jd
               </text>
             </g>

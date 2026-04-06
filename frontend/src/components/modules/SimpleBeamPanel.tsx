@@ -960,7 +960,7 @@ export default function SimpleBeamPanel() {
 
       {/* ══ 중앙: 단면도 + Design Parameters ══ */}
       <div style={{
-        width: isCompact ? '100%' : 'clamp(240px, 30%, 360px)',
+        width: isCompact ? '100%' : 'clamp(320px, 42%, 520px)',
         flexShrink: 0,
         display: showSection ? 'flex' : 'none',
         flexDirection: 'column',
@@ -1021,7 +1021,7 @@ export default function SimpleBeamPanel() {
                   b={sec.b} h={sec.h} d={secD.d}
                   c={cDiag} a={aDiag} As={As}
                   Et={etDiag}
-                  width={620} height={350}
+                  width={700} height={420}
                 />
               : null
             }
