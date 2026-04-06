@@ -35,14 +35,12 @@ export default function SimpleBeamDiagram({
 
   const has2ndRow  = rebar.tension.length >= 2 && (rebar.tension[1]?.count ?? 0) > 0
 
-  // ── 레이아웃 패딩 ──────────────────────────────────────────
-  // 우측: d 치수선(14) + 여백(4) + [d' 치수선(14) + 여백(4)] = 36 or 18
-  const padL = 38
-  const padR = has2ndRow ? 50 : 34
-  const padT = 18
-  // 하단: b 치수선(16) + 간격(4) + 철근 레이블 줄수×13
+  // ── 레이아웃 패딩 (최소화하여 꽉 차게) ────────────────────
+  const padL = 42
+  const padR = has2ndRow ? 54 : 38
+  const padT = 10
   const rebarRowCount = rebar.tension.filter((_, i) => i === 0 || (rebar.tension[1]?.count ?? 0) > 0).length
-  const padB = 30 + rebarRowCount * 13
+  const padB = 34 + rebarRowCount * 15
 
   const sw = width - padL - padR
   const sh = height - padT - padB
@@ -249,7 +247,7 @@ export default function SimpleBeamDiagram({
       <line x1={hLineX} y1={oy} x2={hLineX} y2={oy+drawH}
         stroke={CLR_GRAY} strokeWidth="0.9" markerStart="url(#arG0)" markerEnd="url(#arG1)"/>
       <text x={hLineX} y={oy+drawH/2} textAnchor="middle" fill={CLR_GRAY}
-        fontSize="9" fontFamily={mono} fontWeight="600"
+        fontSize="12" fontFamily={mono} fontWeight="700"
         transform={`rotate(-90,${hLineX},${oy+drawH/2})`}>h={section.h}</text>
 
       {/* ── d 치수선 (우측 1열: 상단 → 도심) ── */}
@@ -259,8 +257,8 @@ export default function SimpleBeamDiagram({
           <line x1={ox+drawW} y1={dPx}  x2={dLineX+2} y2={dPx}  stroke="#9ba3b2" strokeWidth="0.5" strokeDasharray="2 1.5"/>
           <line x1={dLineX} y1={oy} x2={dLineX} y2={dPx}
             stroke={CLR_DARK} strokeWidth="1.0" markerStart="url(#arD0)" markerEnd="url(#arD1)"/>
-          <text x={dLineX+4} y={(oy+dPx)/2+4}
-            fill={CLR_DARK} fontSize="11" fontFamily={mono} fontWeight="800" textAnchor="start">d</text>
+          <text x={dLineX+5} y={(oy+dPx)/2+5}
+            fill={CLR_DARK} fontSize="14" fontFamily={mono} fontWeight="800" textAnchor="start">d</text>
         </>
       )}
 
@@ -275,8 +273,8 @@ export default function SimpleBeamDiagram({
           <line x1={dPLX} y1={dPx} x2={dPLX} y2={t2BarCy}
             stroke={CLR_D2} strokeWidth="0.9" markerStart="url(#arD20)" markerEnd="url(#arD21)"/>
           {/* 레이블 */}
-          <text x={dPLX+4} y={(dPx+t2BarCy)/2+4}
-            fill={CLR_D2} fontSize="9" fontFamily={mono} fontWeight="700" textAnchor="start">d'</text>
+          <text x={dPLX+5} y={(dPx+t2BarCy)/2+5}
+            fill={CLR_D2} fontSize="12" fontFamily={mono} fontWeight="700" textAnchor="start">d'</text>
         </>
       )}
 
@@ -287,8 +285,8 @@ export default function SimpleBeamDiagram({
           <line x1={ox} y1={dPrimePx_comp} x2={dPLX_L-2} y2={dPrimePx_comp} stroke="#9ba3b2" strokeWidth="0.4" strokeDasharray="2 1.5"/>
           <line x1={dPLX_L} y1={oy} x2={dPLX_L} y2={dPrimePx_comp}
             stroke="#7a6030" strokeWidth="0.9" markerStart="url(#arD20)" markerEnd="url(#arD21)"/>
-          <text x={dPLX_L-2} y={(oy+dPrimePx_comp)/2+4}
-            fill="#7a6030" fontSize="9" fontFamily={mono} fontWeight="700" textAnchor="end">d'</text>
+          <text x={dPLX_L-3} y={(oy+dPrimePx_comp)/2+5}
+            fill="#7a6030" fontSize="12" fontFamily={mono} fontWeight="700" textAnchor="end">d'</text>
         </>
       )}
 
@@ -297,8 +295,8 @@ export default function SimpleBeamDiagram({
       <line x1={ox+drawW}  y1={oy+drawH} x2={ox+drawW}  y2={bLineY+2} stroke="#9ba3b2" strokeWidth="0.45" strokeDasharray="2 1.5"/>
       <line x1={ox} y1={bLineY} x2={ox+drawW} y2={bLineY}
         stroke={CLR_GRAY} strokeWidth="0.9" markerStart="url(#arG0)" markerEnd="url(#arG1)"/>
-      <text x={ox+drawW/2} y={bLineY+11}
-        textAnchor="middle" fill={CLR_GRAY} fontSize="9" fontFamily={mono} fontWeight="600">
+      <text x={ox+drawW/2} y={bLineY+13}
+        textAnchor="middle" fill={CLR_GRAY} fontSize="12" fontFamily={mono} fontWeight="700">
         b={section.b}
       </text>
 
@@ -332,14 +330,14 @@ export default function SimpleBeamDiagram({
 
       {/* ── 하단 철근 레이블 (b 치수선 아래) ── */}
       {t1Label && (
-        <text x={ox + drawW / 2} y={bLineY + 24}
-          textAnchor="middle" fill="#1a2040" fontSize="8.5" fontFamily={mono} fontWeight="600">
+        <text x={ox + drawW / 2} y={bLineY + 26}
+          textAnchor="middle" fill="#1a2040" fontSize="10" fontFamily={mono} fontWeight="700">
           {t1Label}
         </text>
       )}
       {t2Label && (
-        <text x={ox + drawW / 2} y={bLineY + 38}
-          textAnchor="middle" fill={CLR_D2} fontSize="8.5" fontFamily={mono} fontWeight="600">
+        <text x={ox + drawW / 2} y={bLineY + 42}
+          textAnchor="middle" fill={CLR_D2} fontSize="10" fontFamily={mono} fontWeight="700">
           {t2Label}
         </text>
       )}
@@ -351,8 +349,8 @@ export default function SimpleBeamDiagram({
         const cnt = rebar.compression[0]?.count ?? 0
         const label = `${cnt > 0 ? `${cnt}-` : ''}${rebarPrefix}${cDiaMm}`
         return (
-          <text x={cx} y={firstBar.cy + firstBar.r + 9}
-            textAnchor="middle" fill="#1a2040" fontSize="8" fontFamily={mono} fontWeight="600">
+          <text x={cx} y={firstBar.cy + firstBar.r + 11}
+            textAnchor="middle" fill="#1a2040" fontSize="10" fontFamily={mono} fontWeight="700">
             {label}
           </text>
         )
@@ -364,7 +362,7 @@ export default function SimpleBeamDiagram({
         const lx = ox + drawW * 0.78
         const ly = oy + drawH / 2
         return (
-          <text x={lx} y={ly} fill="#1a6030" fontSize="7.5" fontFamily={mono} fontWeight="600"
+          <text x={lx} y={ly} fill="#1a6030" fontSize="9" fontFamily={mono} fontWeight="700"
             textAnchor="middle" transform={`rotate(-90,${lx},${ly})`}>{label}</text>
         )
       })()}
@@ -393,7 +391,7 @@ interface StrainForceProps {
 export function StrainForceDiagram({
   b, h, d, c, a, As: _As,
   Et,
-  width = 620, height = 300,
+  width = 620, height = 350,
 }: StrainForceProps) {
   // ── 폰트 / 색상 ────────────────────────────────────────────
   const serif = 'Times New Roman, Georgia, serif'
@@ -402,12 +400,12 @@ export function StrainForceDiagram({
   const GREY  = '#bbbbbb'
 
   // ══════════════════════════════════════════════════════════
-  // 레이아웃: viewBox = 620 × H (상단 2그림만, 하단 가로단면 제거)
+  // 레이아웃: viewBox = 620 × H (Strain + Stress Block 2그림)
   //   titleH : 제목 영역
   //   topH   : Strain Diagram | Stress Block & Forces
   // ══════════════════════════════════════════════════════════
   const W = width
-  const titleH = 50
+  const titleH = 56
   const topH   = height - titleH
   const H = height
 
@@ -426,9 +424,10 @@ export function StrainForceDiagram({
   const vAvailH = topH - padT2 - padB2
   const vAvailW = W - midX - padL2 - padR2
 
-  // 세로 단면: h방향=vAvailH, b방향=vAvailH*(b/h) — b/h 비율 올바르게
+  // 세로 단면: h방향=vAvailH, 폭은 이미지 개념으로 반폭 제한
   const vSecH = vAvailH
-  const vSecW = Math.min(Math.round(vSecH * b / h), vAvailW)
+  const vSecW_raw = Math.min(Math.round(vSecH * b / h), vAvailW)
+  const vSecW = Math.min(vSecW_raw, Math.round(vAvailW * 0.45))  // 폭 반으로 제한
   const vSecX = midX + padL2 + Math.round((vAvailW - vSecW) / 2)
   const vSecY = topY + padT2
 
@@ -495,12 +494,12 @@ export function StrainForceDiagram({
       </defs>
 
       {/* ── 제목 영역 ── */}
-      <text x={W / 2} y={16} textAnchor="middle"
-        fontSize="14" fontFamily={serif} fontWeight="bold" fill={INK}>
+      <text x={W / 2} y={20} textAnchor="middle"
+        fontSize="17" fontFamily={serif} fontWeight="bold" fill={INK}>
         Bending Section Analysis of RC Beam
       </text>
-      <text x={W / 2} y={32} textAnchor="middle"
-        fontSize="11" fontFamily={serif} fill={INK2}>
+      <text x={W / 2} y={38} textAnchor="middle"
+        fontSize="13" fontFamily={serif} fill={INK2}>
         (Ultimate Limit State)
       </text>
 
@@ -509,8 +508,8 @@ export function StrainForceDiagram({
       ═══════════════════════════════════════════════════ */}
       <g>
         {/* 열 제목 */}
-        <text x={(padL1 + midX) / 2} y={topY + 18}
-          textAnchor="middle" fontSize="12" fontFamily={serif} fontWeight="bold" fill={INK}
+        <text x={(padL1 + midX) / 2} y={topY + 20}
+          textAnchor="middle" fontSize="14" fontFamily={serif} fontWeight="bold" fill={INK}
           textDecoration="underline">
           Strain Diagram
         </text>
@@ -535,16 +534,16 @@ export function StrainForceDiagram({
           stroke={INK} strokeWidth="0.7" strokeDasharray="3 2"/>
 
         {/* εcu = 0.003 (상단, 삼각형 끝점 위) */}
-        <text x={strX0 - eCuPx} y={strY0 - 6}
-          textAnchor="middle" fontSize="11" fontFamily={serif} fontStyle="italic" fill={INK}>
-          ε<tspan fontSize="8.5" dy="2">cu</tspan>
+        <text x={strX0 - eCuPx} y={strY0 - 8}
+          textAnchor="middle" fontSize="13" fontFamily={serif} fontStyle="italic" fill={INK}>
+          ε<tspan fontSize="10" dy="2">cu</tspan>
           <tspan dy="-2" fontStyle="normal"> = 0.003</tspan>
         </text>
 
         {/* εt 레이블 (d 위치, 삼각형 끝점 왼쪽) */}
-        <text x={strX0 - eTpx - 5} y={strDY + 4}
-          textAnchor="end" fontSize="11" fontFamily={serif} fontStyle="italic" fill={INK}>
-          ε<tspan fontSize="8.5" dy="2">t</tspan>
+        <text x={strX0 - eTpx - 5} y={strDY + 5}
+          textAnchor="end" fontSize="13" fontFamily={serif} fontStyle="italic" fill={INK}>
+          ε<tspan fontSize="10" dy="2">t</tspan>
           <tspan dy="-2" fontStyle="normal"> = {(Et >= 0 ? '' : '-')}{Math.abs(Et).toFixed(4)}</tspan>
         </text>
 
@@ -561,8 +560,8 @@ export function StrainForceDiagram({
                 <polygon points={`${dx},${strY0} ${dx-AW},${strY0+AH} ${dx+AW},${strY0+AH}`} fill={INK}/>
                 <polygon points={`${dx},${strCY} ${dx-AW},${strCY-AH} ${dx+AW},${strCY-AH}`} fill={INK}/>
               </>}
-              <text x={dx + 5} y={(strY0 + strCY) / 2 + 4}
-                fontSize="13" fontFamily={serif} fontStyle="italic" fill={INK}>c</text>
+              <text x={dx + 6} y={(strY0 + strCY) / 2 + 5}
+                fontSize="15" fontFamily={serif} fontStyle="italic" fill={INK}>c</text>
             </g>
           )
         })()}
@@ -580,8 +579,8 @@ export function StrainForceDiagram({
                 <polygon points={`${dx},${strY0} ${dx-AW},${strY0+AH} ${dx+AW},${strY0+AH}`} fill={INK}/>
                 <polygon points={`${dx},${strDY} ${dx-AW},${strDY-AH} ${dx+AW},${strDY-AH}`} fill={INK}/>
               </>}
-              <text x={dx + 5} y={(strY0 + strDY) / 2 + 4}
-                fontSize="11" fontFamily={serif} fontStyle="italic" fill={INK}>
+              <text x={dx + 6} y={(strY0 + strDY) / 2 + 5}
+                fontSize="13" fontFamily={serif} fontStyle="italic" fill={INK}>
                 d = {f1(d)} mm
               </text>
             </g>
@@ -601,8 +600,8 @@ export function StrainForceDiagram({
                 <polygon points={`${strX0-eCuPx},${dimY} ${strX0-eCuPx+AH},${dimY-AW} ${strX0-eCuPx+AH},${dimY+AW}`} fill={INK}/>
                 <polygon points={`${strX0},${dimY} ${strX0-AH},${dimY-AW} ${strX0-AH},${dimY+AW}`} fill={INK}/>
               </>}
-              <text x={strX0 - eCuPx / 2} y={dimY + 12}
-                textAnchor="middle" fontSize="12" fontFamily={serif} fontStyle="italic" fill={INK}>
+              <text x={strX0 - eCuPx / 2} y={dimY + 14}
+                textAnchor="middle" fontSize="14" fontFamily={serif} fontStyle="italic" fill={INK}>
                 ← c →
               </text>
             </g>
@@ -615,17 +614,17 @@ export function StrainForceDiagram({
       ═══════════════════════════════════════════════════ */}
       <g>
         {/* 열 제목 */}
-        <text x={midX + (W - midX) / 2} y={topY + 18}
-          textAnchor="middle" fontSize="12" fontFamily={serif} fontWeight="bold" fill={INK}
+        <text x={midX + (W - midX) / 2} y={topY + 20}
+          textAnchor="middle" fontSize="14" fontFamily={serif} fontWeight="bold" fill={INK}
           textDecoration="underline">
           Stress Block &amp; Forces
         </text>
 
         {/* Cc = 0.85fc·b·a 상단 레이블 */}
-        <text x={vSecX + vSecW / 2} y={topY + 32}
-          textAnchor="middle" fontSize="11" fontFamily={serif} fill={INK}>
+        <text x={vSecX + vSecW / 2} y={topY + 36}
+          textAnchor="middle" fontSize="13" fontFamily={serif} fill={INK}>
           <tspan fontStyle="italic">C</tspan>
-          <tspan fontSize="9" dy="2">c</tspan>
+          <tspan fontSize="10" dy="2">c</tspan>
           <tspan dy="-2"> = 0.85</tspan>
           <tspan fontStyle="italic">f</tspan>
           <tspan fontSize="9" dy="2">c</tspan>
@@ -663,12 +662,12 @@ export function StrainForceDiagram({
         <line x1={vSecX - 5} y1={vDY} x2={vSecX + vSecW + 5} y2={vDY}
           stroke={INK2} strokeWidth="0.7" strokeDasharray="3 2"/>
 
-        {/* 철근 5개 (세로 단면) */}
-        {Array.from({ length: 5 }, (_, i) => {
-          const vCoverPx = Math.max(vSecW * 0.08, 5)
-          const vBarR = Math.max(vSecW * 0.05, 4)
+        {/* 철근 4개 (세로 단면, 폭 축소에 맞게) */}
+        {Array.from({ length: 4 }, (_, i) => {
+          const vCoverPx = Math.max(vSecW * 0.10, 4)
+          const vBarR = Math.max(vSecW * 0.035, 2.5)
           const vBarSpan = vSecW - vCoverPx * 2
-          const vBarSpc = vBarSpan / 4
+          const vBarSpc = vBarSpan / 3
           return (
             <circle key={i}
               cx={vSecX + vCoverPx + i * vBarSpc} cy={vDY} r={vBarR}
@@ -686,9 +685,9 @@ export function StrainForceDiagram({
               <line x1={cx} y1={tailY} x2={cx} y2={tipY + AH6}
                 stroke={INK} strokeWidth="2.2"/>
               <polygon points={`${cx},${tipY} ${cx-AW6},${tipY+AH6} ${cx+AW6},${tipY+AH6}`} fill={INK}/>
-              <text x={cx + 6} y={(tipY + tailY) / 2 + 5}
-                fontSize="14" fontFamily={serif} fontStyle="italic" fontWeight="bold" fill={INK}>
-                C<tspan fontSize="10" dy="3">c</tspan>
+              <text x={cx + 8} y={(tipY + tailY) / 2 + 6}
+                fontSize="16" fontFamily={serif} fontStyle="italic" fontWeight="bold" fill={INK}>
+                C<tspan fontSize="12" dy="3">c</tspan>
               </text>
             </g>
           )
@@ -705,8 +704,8 @@ export function StrainForceDiagram({
               <line x1={dx} y1={vSecY + AH} x2={dx} y2={vAY - AH} stroke={INK} strokeWidth="0.9"/>
               <polygon points={`${dx},${vSecY} ${dx-AW},${vSecY+AH} ${dx+AW},${vSecY+AH}`} fill={INK}/>
               <polygon points={`${dx},${vAY} ${dx-AW},${vAY-AH} ${dx+AW},${vAY-AH}`} fill={INK}/>
-              <text x={dx - 4} y={(vSecY + vAY) / 2 + 4}
-                textAnchor="end" fontSize="13" fontFamily={serif} fontStyle="italic" fill={INK}>a</text>
+              <text x={dx - 5} y={(vSecY + vAY) / 2 + 5}
+                textAnchor="end" fontSize="15" fontFamily={serif} fontStyle="italic" fill={INK}>a</text>
             </g>
           )
         })()}
@@ -722,8 +721,8 @@ export function StrainForceDiagram({
               <line x1={dx} y1={vSecY + AH} x2={dx} y2={vCY - AH} stroke={INK} strokeWidth="0.9"/>
               <polygon points={`${dx},${vSecY} ${dx-AW},${vSecY+AH} ${dx+AW},${vSecY+AH}`} fill={INK}/>
               <polygon points={`${dx},${vCY} ${dx-AW},${vCY-AH} ${dx+AW},${vCY-AH}`} fill={INK}/>
-              <text x={dx - 4} y={(vSecY + vCY) / 2 + 4}
-                textAnchor="end" fontSize="13" fontFamily={serif} fontStyle="italic" fill={INK}>c</text>
+              <text x={dx - 5} y={(vSecY + vCY) / 2 + 5}
+                textAnchor="end" fontSize="15" fontFamily={serif} fontStyle="italic" fill={INK}>c</text>
             </g>
           )
         })()}
@@ -739,8 +738,8 @@ export function StrainForceDiagram({
               <line x1={dx} y1={vSecY + AH} x2={dx} y2={vDY - AH} stroke={INK} strokeWidth="0.9"/>
               <polygon points={`${dx},${vSecY} ${dx-AW},${vSecY+AH} ${dx+AW},${vSecY+AH}`} fill={INK}/>
               <polygon points={`${dx},${vDY} ${dx-AW},${vDY-AH} ${dx+AW},${vDY-AH}`} fill={INK}/>
-              <text x={dx + 4} y={(vSecY + vDY) / 2 + 4}
-                fontSize="13" fontFamily={serif} fontStyle="italic" fill={INK}>d</text>
+              <text x={dx + 5} y={(vSecY + vDY) / 2 + 5}
+                fontSize="15" fontFamily={serif} fontStyle="italic" fill={INK}>d</text>
             </g>
           )
         })()}
@@ -756,8 +755,8 @@ export function StrainForceDiagram({
               <line x1={dx} y1={vCcY + AH} x2={dx} y2={vDY - AH} stroke={INK} strokeWidth="0.9"/>
               <polygon points={`${dx},${vCcY} ${dx-AW},${vCcY+AH} ${dx+AW},${vCcY+AH}`} fill={INK}/>
               <polygon points={`${dx},${vDY} ${dx-AW},${vDY-AH} ${dx+AW},${vDY-AH}`} fill={INK}/>
-              <text x={dx + 4} y={(vCcY + vDY) / 2 + 4}
-                fontSize="12" fontFamily={serif} fontStyle="italic" fill={INK}>
+              <text x={dx + 5} y={(vCcY + vDY) / 2 + 5}
+                fontSize="14" fontFamily={serif} fontStyle="italic" fill={INK}>
                 z ≅ jd
               </text>
             </g>
@@ -775,8 +774,8 @@ export function StrainForceDiagram({
               <line x1={vSecX + AH} y1={dimY} x2={vSecX + vSecW - AH} y2={dimY} stroke={INK} strokeWidth="0.9"/>
               <polygon points={`${vSecX},${dimY} ${vSecX+AH},${dimY-AW} ${vSecX+AH},${dimY+AW}`} fill={INK}/>
               <polygon points={`${vSecX+vSecW},${dimY} ${vSecX+vSecW-AH},${dimY-AW} ${vSecX+vSecW-AH},${dimY+AW}`} fill={INK}/>
-              <text x={vSecX + vSecW / 2} y={dimY + 12}
-                textAnchor="middle" fontSize="11" fontFamily={serif} fill={INK}>
+              <text x={vSecX + vSecW / 2} y={dimY + 14}
+                textAnchor="middle" fontSize="13" fontFamily={serif} fill={INK}>
                 ← <tspan fontStyle="italic">b</tspan> = {b} mm →
               </text>
             </g>

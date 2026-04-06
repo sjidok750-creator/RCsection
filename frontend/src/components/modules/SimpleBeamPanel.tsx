@@ -1021,7 +1021,7 @@ export default function SimpleBeamPanel() {
                   b={sec.b} h={sec.h} d={secD.d}
                   c={cDiag} a={aDiag} As={As}
                   Et={etDiag}
-                  width={620} height={300}
+                  width={620} height={350}
                 />
               : null
             }
