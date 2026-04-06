@@ -402,110 +402,102 @@ export function StrainForceDiagram({
   const GREY  = '#bbbbbb'
 
   // ══════════════════════════════════════════════════════════
-  // 레이아웃: width=620, height=520
-  //   titleH  : 제목 영역 높이
-  //   topH    : 상단 행 (Strain | 세로단면)
-  //   botH    : 하단 행 (광폭 가로 단면)
+  // 레이아웃: viewBox = 620 × 520 (고정, preserveAspectRatio로 비율 유지)
+  //   titleH : 제목 영역
+  //   topH   : 상단 행 (Strain | 세로단면)
+  //   botH   : 하단 행 (광폭 가로 단면)
   // ══════════════════════════════════════════════════════════
   const W = width, H = height
-  const titleH = 46   // 제목 2줄
-  const divH   = 8    // 행 사이 간격
-  const topH   = Math.round((H - titleH - divH) * 0.54)   // 상단 행
-  const botH   = H - titleH - divH - topH                 // 하단 행
+  const titleH = 50
+  const divH   = 10
+  const topH   = Math.round((H - titleH - divH) * 0.52)
+  const botH   = H - titleH - divH - topH
 
-  // ── 치수 계산 ────────────────────────────────────────────
-  const f1    = (v: number) => v.toFixed(1)
+  const f1 = (v: number) => v.toFixed(1)
 
-  // ══════════════════════════════════════════════════════════
-  // 상단 행 레이아웃
-  //   topY    = titleH
-  //   왼쪽: Strain Diagram  (폭 = W*0.5 - 여백)
-  //   오른쪽: 세로 단면     (폭 = W*0.5 - 여백)
-  //   세로단면 높이 = topH (상단 패딩, 하단 b치수선 제외한 순 그리기 높이)
-  // ══════════════════════════════════════════════════════════
+  // ── 상단 좌우 분할 ────────────────────────────────────────
   const topY = titleH
+  const midX = Math.round(W * 0.48)   // 좌측(Strain)이 약간 넓게
 
-  // 상단 행: 좌우 분할 x
-  const midX = Math.round(W / 2)
+  // ══════════════════════════════════════════════════════════
+  // 상단 우: 세로 단면 (b×h 실제 비율)
+  //   보 단면은 보통 h > b (세로로 긺)
+  //   픽셀: 가용높이에 맞추고, 폭은 b/h 비율로 계산
+  // ══════════════════════════════════════════════════════════
+  const padT2 = 32, padB2 = 24, padL2 = 36, padR2 = 56
+  const vAvailH = topH - padT2 - padB2
+  const vAvailW = W - midX - padL2 - padR2
 
-  // 세로 단면 (오른쪽 절반): 실제 b/h 비율 반영
-  // padT2=여백, padB2=하단 b 치수선
-  const padT2 = 30, padB2 = 22, padL2 = 40, padR2 = 60
-  const vSecAreaW = W - midX - padL2 - padR2
-  const vSecAreaH = topH - padT2 - padB2
-  // 세로 단면 픽셀 크기 (b/h 비율)
-  const vSecH = vSecAreaH
-  const vSecW = Math.min(Math.round(vSecH * b / h), vSecAreaW)
-  const vSecX = midX + padL2 + (vSecAreaW - vSecW) / 2
+  // 세로 단면: h방향=vAvailH, b방향=vAvailH*(b/h) — b/h 비율 올바르게
+  const vSecH = vAvailH
+  const vSecW = Math.min(Math.round(vSecH * b / h), vAvailW)
+  const vSecX = midX + padL2 + Math.round((vAvailW - vSecW) / 2)
   const vSecY = topY + padT2
 
-  // 세로 단면 스케일
-  const vSY = vSecH / h
-  const vCpx = c * vSY
-  const vApx = a * vSY
-  const vDpx = d * vSY
-  const vCY  = vSecY + vCpx
-  const vAY  = vSecY + vApx
-  const vDY  = vSecY + vDpx
-  const vCcY = vSecY + vApx / 2   // Cc 작용점
+  const vSY   = vSecH / h
+  const vCpx  = c * vSY
+  const vApx  = a * vSY
+  const vDpx  = d * vSY
+  const vCY   = vSecY + vCpx
+  const vAY   = vSecY + vApx
+  const vDY   = vSecY + vDpx
+  const vCcY  = vSecY + vApx / 2
 
-  // ── Strain Diagram 레이아웃 ───────────────────────────────
-  // 왼쪽 절반. 변형률도는 "좌측 축(0선)=단면 우측, 오른쪽으로 변형률"
-  // 즉 삼각형이 왼쪽으로 뻗음 (이미지와 동일)
-  const padL1 = 60, padR1 = 30, padT1 = 28, padB1 = 18
-  const strAreaW = midX - padL1 - padR1
-  const strAreaH = topH - padT1 - padB1
-  const strH = strAreaH   // 높이 = 단면 세로 픽셀
-  const strSY = strH / h
+  // ══════════════════════════════════════════════════════════
+  // 상단 좌: Strain Diagram
+  //   0-축은 오른쪽, 삼각형은 왼쪽으로 뻗음
+  //   세로 높이는 세로 단면과 동일하게 정렬
+  // ══════════════════════════════════════════════════════════
+  const padL1 = 10, padR1 = 44, padT1 = padT2
+  const strH  = vSecH   // 세로 단면과 동일 높이 → 점선 정렬
+  const strX0 = midX - padR1        // 0-축 x
+  const strY0 = topY + padT1        // 상단 y (세로 단면 상단과 같음)
+  const strAreaW = strX0 - padL1    // 삼각형이 뻗을 수 있는 최대 폭
+
+  const strSY  = strH / h
   const strCpx = c * strSY
   const strDpx = d * strSY
-  // 0-축 x (단면 오른쪽 경계 = strain diagram 오른쪽)
-  const strX0 = midX - padR1   // 0-축 x
-  const strY0 = topY + padT1   // 상단 y
-  const strCY = strY0 + strCpx
-  const strDY = strY0 + strDpx
+  const strCY  = strY0 + strCpx
+  const strDY  = strY0 + strDpx
 
-  // εcu, εt → px 폭
-  const eMax   = Math.max(0.003, Math.abs(Et)) * 1.15
-  const eCuPx  = strAreaW * 0.003 / eMax
-  const eTpx   = strAreaW * Math.abs(Et) / eMax
+  // εcu, εt → px 폭 (strAreaW 기준)
+  const eMax  = Math.max(0.003, Math.abs(Et)) * 1.12
+  const eCuPx = strAreaW * 0.003 / eMax
+  const eTpx  = strAreaW * Math.abs(Et) / eMax
 
-  // 삼각형 꼭짓점 (0축이 오른쪽, 변형률은 왼쪽으로)
   const compPts = `${strX0},${strY0} ${strX0 - eCuPx},${strY0} ${strX0},${strCY}`
   const tensPts = `${strX0},${strCY} ${strX0 - eTpx},${strDY} ${strX0},${strDY}`
 
   // ══════════════════════════════════════════════════════════
-  // 하단 행 레이아웃: 가로 단면 (광폭보)
-  //   가로 단면은 h/b 비율 (세로를 좁게)
+  // 하단: 광폭 가로 단면 (b×h, b방향=전폭, h방향=실제비율)
   // ══════════════════════════════════════════════════════════
-  const botY = topY + topH + divH
-  const padLB = 52, padRB = 70, padTB = 18, padBB = 32
-  const hSecAreaW = W - padLB - padRB
-  const hSecAreaH = botH - padTB - padBB
-  // 가로 단면 픽셀 (h/b 비율)
-  const hSecW = hSecAreaW
-  const hSecH = Math.min(Math.round(hSecW * h / b), hSecAreaH)
-  const hSecX = padLB
-  const hSecY = botY + padTB + (hSecAreaH - hSecH) / 2
+  const botY   = topY + topH + divH
+  const padLB  = 50, padRB  = 68, padTB = 16, padBB = 36
+  const hSecW  = W - padLB - padRB
+  const hAvailH = botH - padTB - padBB
+  // 가로 단면: b방향=hSecW, h방향=hSecW*(h/b) — 실제 h/b 비율
+  const hSecH  = Math.min(Math.round(hSecW * h / b), hAvailH)
+  const hSecX  = padLB
+  const hSecY  = botY + padTB + Math.round((hAvailH - hSecH) / 2)
 
-  // 가로 단면 스케일 (y방향=h)
-  const hSY2 = hSecH / h
-  const hApx = a * hSY2   // 압축블록 깊이 (픽셀)
-  const hDpx = d * hSY2   // 유효깊이 (픽셀)
+  const hSY2   = hSecH / h
+  const hApx   = a * hSY2
+  const hDpx   = d * hSY2
 
-  // 가로 단면에서 철근 배치 (8개, 하단 인장측)
-  const hNBar = 8
-  const hCoverPx = Math.max(hSecH * 0.09, 5)
-  const hBarR = Math.max(hSecW * 0.008, 3.5)
-  const hBarY = hSecY + hSecH - hCoverPx
+  // 가로 단면 철근 배치
+  const hNBar    = 8
+  const hCoverPx = Math.max(hSecH * 0.10, 6)
+  const hBarR    = Math.min(Math.max(hSecW * 0.009, 4), 8)
+  const hBarY    = hSecY + hSecH - hCoverPx
   const hBarSpan = hSecW - hCoverPx * 2
-  const hBarSpc = hBarSpan / (hNBar - 1)
+  const hBarSpc  = hBarSpan / (hNBar - 1)
 
-  // 화살표 헬퍼
+  // 화살표 상수
   const AH6 = 7, AW6 = 5
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="100%"
+      preserveAspectRatio="xMidYMid meet"
       style={{ display: 'block', background: '#ffffff' }}>
       <defs>
         {/* 콘크리트 해칭 */}
@@ -543,9 +535,9 @@ export function StrainForceDiagram({
       ═══════════════════════════════════════════════════ */}
       <g>
         {/* 열 제목 */}
-        <text x={(padL1 + strX0) / 2} y={topY + 16}
+        <text x={(padL1 + midX) / 2} y={topY + 18}
           textAnchor="middle" fontSize="12" fontFamily={serif} fontWeight="bold" fill={INK}
-          style={{ textDecoration: 'underline' }}>
+          textDecoration="underline">
           Strain Diagram
         </text>
 
@@ -568,58 +560,53 @@ export function StrainForceDiagram({
         <line x1={strX0 - strAreaW * 0.5} y1={strDY} x2={strX0 + 15} y2={strDY}
           stroke={INK} strokeWidth="0.7" strokeDasharray="3 2"/>
 
-        {/* εcu = 0.003 (상단 좌측, 삼각형 바깥) */}
-        <text x={strX0 - eCuPx - 4} y={strY0 - 4}
-          textAnchor="end" fontSize="12" fontFamily={serif} fontStyle="italic" fill={INK}>
-          ε<tspan fontSize="9" dy="2">cu</tspan>
+        {/* εcu = 0.003 (상단, 삼각형 끝점 위) */}
+        <text x={strX0 - eCuPx} y={strY0 - 6}
+          textAnchor="middle" fontSize="11" fontFamily={serif} fontStyle="italic" fill={INK}>
+          ε<tspan fontSize="8.5" dy="2">cu</tspan>
           <tspan dy="-2" fontStyle="normal"> = 0.003</tspan>
         </text>
 
-        {/* 중립축 c 레이블 */}
-        <text x={strX0 - eCuPx * 0.3 - 2} y={strCY - 3}
+        {/* εt 레이블 (d 위치, 삼각형 끝점 왼쪽) */}
+        <text x={strX0 - eTpx - 5} y={strDY + 4}
           textAnchor="end" fontSize="11" fontFamily={serif} fontStyle="italic" fill={INK}>
-          c
-        </text>
-        {/* → c 수평 화살표 (0축에서 오른쪽) */}
-        <line x1={strX0 - eCuPx * 0.45} y1={strCY} x2={strX0 + 12} y2={strCY}
-          stroke={INK} strokeWidth="1.0"/>
-        <polygon points={`${strX0+15},${strCY} ${strX0+8},${strCY-3} ${strX0+8},${strCY+3}`} fill={INK}/>
-
-        {/* εt (d 위치 좌측) */}
-        <text x={strX0 - eTpx - 4} y={strDY + 5}
-          textAnchor="end" fontSize="12" fontFamily={serif} fontStyle="italic" fill={INK}>
-          ε<tspan fontSize="9" dy="2">t</tspan>
+          ε<tspan fontSize="8.5" dy="2">t</tspan>
+          <tspan dy="-2" fontStyle="normal"> = {(Et >= 0 ? '' : '-')}{Math.abs(Et).toFixed(4)}</tspan>
         </text>
 
-        {/* c 치수선 (우측 0축 바깥) */}
+        {/* c 치수선 (우측 0축 오른쪽, 상단~중립축) */}
         {(() => {
-          const dx = strX0 + 22
+          const dx = strX0 + 20
           const AH = 5, AW = 3.5
           return (
             <g>
-              <line x1={strX0} y1={strY0} x2={dx} y2={strY0} stroke={INK2} strokeWidth="0.5" strokeDasharray="2 1.5"/>
-              <line x1={strX0} y1={strCY} x2={dx} y2={strCY} stroke={INK2} strokeWidth="0.5" strokeDasharray="2 1.5"/>
-              <line x1={dx} y1={strY0 + AH} x2={dx} y2={strCY - AH} stroke={INK} strokeWidth="0.9"/>
-              <polygon points={`${dx},${strY0} ${dx-AW},${strY0+AH} ${dx+AW},${strY0+AH}`} fill={INK}/>
-              <polygon points={`${dx},${strCY} ${dx-AW},${strCY-AH} ${dx+AW},${strCY-AH}`} fill={INK}/>
-              <text x={dx + 4} y={(strY0 + strCY) / 2 + 4}
+              <line x1={strX0} y1={strY0} x2={dx + 2} y2={strY0} stroke={INK2} strokeWidth="0.5" strokeDasharray="2 1.5"/>
+              <line x1={strX0} y1={strCY} x2={dx + 2} y2={strCY} stroke={INK2} strokeWidth="0.5" strokeDasharray="2 1.5"/>
+              {strCpx > AH * 2 + 4 && <>
+                <line x1={dx} y1={strY0 + AH} x2={dx} y2={strCY - AH} stroke={INK} strokeWidth="0.9"/>
+                <polygon points={`${dx},${strY0} ${dx-AW},${strY0+AH} ${dx+AW},${strY0+AH}`} fill={INK}/>
+                <polygon points={`${dx},${strCY} ${dx-AW},${strCY-AH} ${dx+AW},${strCY-AH}`} fill={INK}/>
+              </>}
+              <text x={dx + 5} y={(strY0 + strCY) / 2 + 4}
                 fontSize="13" fontFamily={serif} fontStyle="italic" fill={INK}>c</text>
             </g>
           )
         })()}
 
-        {/* d 치수선 (우측, c 바깥) */}
+        {/* d 치수선 (우측, c 치수선 오른쪽) */}
         {(() => {
-          const dx = strX0 + 40
+          const dx = strX0 + 38
           const AH = 5, AW = 3.5
           return (
             <g>
-              <line x1={strX0 + 25} y1={strY0} x2={dx} y2={strY0} stroke={INK2} strokeWidth="0.5" strokeDasharray="2 1.5"/>
-              <line x1={strX0 + 25} y1={strDY} x2={dx} y2={strDY} stroke={INK2} strokeWidth="0.5" strokeDasharray="2 1.5"/>
-              <line x1={dx} y1={strY0 + AH} x2={dx} y2={strDY - AH} stroke={INK} strokeWidth="0.9"/>
-              <polygon points={`${dx},${strY0} ${dx-AW},${strY0+AH} ${dx+AW},${strY0+AH}`} fill={INK}/>
-              <polygon points={`${dx},${strDY} ${dx-AW},${strDY-AH} ${dx+AW},${strDY-AH}`} fill={INK}/>
-              <text x={dx + 4} y={(strY0 + strDY) / 2 + 4}
+              <line x1={strX0 + 22} y1={strY0} x2={dx + 2} y2={strY0} stroke={INK2} strokeWidth="0.5" strokeDasharray="2 1.5"/>
+              <line x1={strX0 + 22} y1={strDY} x2={dx + 2} y2={strDY} stroke={INK2} strokeWidth="0.5" strokeDasharray="2 1.5"/>
+              {strDpx > AH * 2 + 4 && <>
+                <line x1={dx} y1={strY0 + AH} x2={dx} y2={strDY - AH} stroke={INK} strokeWidth="0.9"/>
+                <polygon points={`${dx},${strY0} ${dx-AW},${strY0+AH} ${dx+AW},${strY0+AH}`} fill={INK}/>
+                <polygon points={`${dx},${strDY} ${dx-AW},${strDY-AH} ${dx+AW},${strDY-AH}`} fill={INK}/>
+              </>}
+              <text x={dx + 5} y={(strY0 + strDY) / 2 + 4}
                 fontSize="11" fontFamily={serif} fontStyle="italic" fill={INK}>
                 d = {f1(d)} mm
               </text>
@@ -627,19 +614,23 @@ export function StrainForceDiagram({
           )
         })()}
 
-        {/* c 수평 치수선 (하단, 삼각형 폭) */}
+        {/* c 수평 치수선 (하단) */}
         {(() => {
-          const dimY = strY0 + strH + 12
+          const dimY = strY0 + strH + 13
           const AH = 4, AW = 3
           return (
             <g>
               <line x1={strX0 - eCuPx} y1={strY0 + strH} x2={strX0 - eCuPx} y2={dimY + 3} stroke={INK2} strokeWidth="0.5" strokeDasharray="2 1.5"/>
               <line x1={strX0}          y1={strY0 + strH} x2={strX0}          y2={dimY + 3} stroke={INK2} strokeWidth="0.5" strokeDasharray="2 1.5"/>
-              <line x1={strX0 - eCuPx + AH} y1={dimY} x2={strX0 - AH} y2={dimY} stroke={INK} strokeWidth="0.9"/>
-              <polygon points={`${strX0 - eCuPx},${dimY} ${strX0-eCuPx+AH},${dimY-AW} ${strX0-eCuPx+AH},${dimY+AW}`} fill={INK}/>
-              <polygon points={`${strX0},${dimY} ${strX0-AH},${dimY-AW} ${strX0-AH},${dimY+AW}`} fill={INK}/>
-              <text x={strX0 - eCuPx / 2} y={dimY + 11}
-                textAnchor="middle" fontSize="13" fontFamily={serif} fontStyle="italic" fill={INK}>← c →</text>
+              {eCuPx > AH * 2 + 4 && <>
+                <line x1={strX0 - eCuPx + AH} y1={dimY} x2={strX0 - AH} y2={dimY} stroke={INK} strokeWidth="0.9"/>
+                <polygon points={`${strX0-eCuPx},${dimY} ${strX0-eCuPx+AH},${dimY-AW} ${strX0-eCuPx+AH},${dimY+AW}`} fill={INK}/>
+                <polygon points={`${strX0},${dimY} ${strX0-AH},${dimY-AW} ${strX0-AH},${dimY+AW}`} fill={INK}/>
+              </>}
+              <text x={strX0 - eCuPx / 2} y={dimY + 12}
+                textAnchor="middle" fontSize="12" fontFamily={serif} fontStyle="italic" fill={INK}>
+                ← c →
+              </text>
             </g>
           )
         })()}
@@ -650,14 +641,14 @@ export function StrainForceDiagram({
       ═══════════════════════════════════════════════════ */}
       <g>
         {/* 열 제목 */}
-        <text x={midX + (W - midX) / 2} y={topY + 16}
+        <text x={midX + (W - midX) / 2} y={topY + 18}
           textAnchor="middle" fontSize="12" fontFamily={serif} fontWeight="bold" fill={INK}
-          style={{ textDecoration: 'underline' }}>
+          textDecoration="underline">
           Stress Block &amp; Forces
         </text>
 
         {/* Cc = 0.85fc·b·a 상단 레이블 */}
-        <text x={vSecX + vSecW / 2} y={topY + 28}
+        <text x={vSecX + vSecW / 2} y={topY + 32}
           textAnchor="middle" fontSize="11" fontFamily={serif} fill={INK}>
           <tspan fontStyle="italic">C</tspan>
           <tspan fontSize="9" dy="2">c</tspan>
@@ -823,8 +814,8 @@ export function StrainForceDiagram({
           하단: 광폭 가로 단면
       ═══════════════════════════════════════════════════ */}
       <g>
-        {/* Cc 레이블 (하단 단면 좌상단) */}
-        <text x={hSecX + hSecW * 0.18} y={botY + 13}
+        {/* Cc 레이블 (하단 단면 위) */}
+        <text x={hSecX + hSecW * 0.22} y={hSecY - 8}
           textAnchor="middle" fontSize="11" fontFamily={serif} fill={INK}>
           <tspan fontStyle="italic">C</tspan>
           <tspan fontSize="9" dy="2">c</tspan>
@@ -943,20 +934,19 @@ export function StrainForceDiagram({
 
         {/* 철근 레이블 (하단) */}
         {(() => {
-          // As 역산하여 철근 직경·개수 추정 (표시용)
           const rebarAreas: [number, number][] = [[10,71.3],[13,126.7],[16,198.6],[19,286.5],[22,387.1],[25,506.7],[29,642.4],[32,794.2],[35,956.6]]
           let bestLabel = `As = ${Math.round(As)} mm²`
           for (const [dia, area] of rebarAreas) {
             const n = Math.round(As / area)
-            if (n >= 2 && n <= 20 && Math.abs(n * area - As) / As < 0.02) {
-              bestLabel = `철근 ${n} = ${n}·H${dia}@${f1(b / n)} (100M)`
+            if (n >= 2 && n <= 20 && Math.abs(n * area - As) / As < 0.03) {
+              bestLabel = `철근 ${n} = ${n}-H${dia}  (As = ${Math.round(As)} mm²)`
               break
             }
           }
           return (
-            <text x={hSecX + hSecW / 2} y={hSecY + hSecH + 30}
+            <text x={hSecX + hSecW / 2} y={hSecY + hSecH + 28}
               textAnchor="middle" fontSize="12" fontFamily={serif} fontWeight="bold" fill={INK}>
-              철— {bestLabel}
+              {bestLabel}
             </text>
           )
         })()}

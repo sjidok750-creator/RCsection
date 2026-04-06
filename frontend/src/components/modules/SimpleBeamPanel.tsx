@@ -988,21 +988,25 @@ export default function SimpleBeamPanel() {
         {/* ── 휨 단면 해석도 (Bending Section Analysis) ── */}
         <div style={{
           flex: 1,
-          display: 'flex', alignItems: 'stretch',
-          overflow: 'hidden',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          overflow: 'auto',
           minHeight: 0,
           background: '#ffffff',
+          padding: '0.25rem',
         }}>
           {sec.b > 0 && sec.h > 0 && secD.d > 0 && cDiag > 0
-            ? <StrainForceDiagram
-                b={sec.b} h={sec.h} d={secD.d}
-                c={cDiag} a={aDiag} As={As}
-                Et={etDiag}
-                width={620} height={520}
-              />
+            ? <div style={{ width: '100%', aspectRatio: '620 / 520', maxWidth: '620px', flexShrink: 0 }}>
+                <StrainForceDiagram
+                  b={sec.b} h={sec.h} d={secD.d}
+                  c={cDiag} a={aDiag} As={As}
+                  Et={etDiag}
+                  width={620} height={520}
+                />
+              </div>
             : <div style={{
-                flex: 1, display: 'flex', flexDirection: 'column',
-                alignItems: 'center', justifyContent: 'center', gap: '0.5rem',
+                display: 'flex', flexDirection: 'column',
+                alignItems: 'center', justifyContent: 'center',
+                width: '100%', height: '100%',
                 background: 'var(--surface-2)',
               }}>
                 <SimpleBeamDiagram section={secD} rebar={reb} fy={mat.fy} width={310} height={320}/>
