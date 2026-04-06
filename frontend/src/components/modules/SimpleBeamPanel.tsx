@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import type { MaterialInput, SectionInput, ReinforcementInput, LoadInput, CheckResult, CheckItem, CalcLine } from '../../types'
 import { useResponsive } from '../../hooks/useResponsive'
-import SimpleBeamDiagram, { REBAR_AREA } from '../diagrams/SimpleBeamDiagram'
+import SimpleBeamDiagram, { REBAR_AREA, StrainForceDiagram } from '../diagrams/SimpleBeamDiagram'
 import ResultTable from '../common/ResultTable'
 
 // ── 기본값 ──────────────────────────────────────────────────
@@ -574,6 +574,13 @@ export default function SimpleBeamPanel() {
     return s + n * (REBAR_AREA[l.dia] ?? 0)
   }, 0)
 
+  // 삽도용 단면 해석값 (직접 계산)
+  const beta1Diag = mat.fck <= 28 ? 0.85 : Math.max(0.85 - 0.007 * (mat.fck - 28), 0.65)
+  const aDiag = As > 0 && sec.b > 0 ? (As * mat.fy) / (0.85 * mat.fck * sec.b) : 0
+  const cDiag = beta1Diag > 0 ? aDiag / beta1Diag : 0
+  const eyDiag = mat.fy / mat.Es
+  const etDiag = cDiag > 0 && secD.d > 0 ? 0.003 * (secD.d - cDiag) / cDiag : 0
+
   const rebarOptions = [10,13,16,19,22,25,29,32,35].map(d => ({
     v: d, label: `D${d}  (${REBAR_AREA[d]} mm²)`
   }))
@@ -979,20 +986,47 @@ export default function SimpleBeamPanel() {
           <StatusBadge status={result.overallStatus}/>
         </div>
 
-        {/* 단면도 SVG */}
+        {/* ── 상단: 단면도 SVG ── */}
         <div style={{
-          flex: 1,
+          flex: '0 0 58%',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: '0.5rem 0.5rem 0.3rem',
+          padding: '0.4rem 0.4rem 0.2rem',
           overflow: 'hidden',
           minHeight: 0,
           background: sec.b > 0 && sec.h > 0 ? undefined : 'var(--surface-2)',
+          borderBottom: '1px solid var(--border-light)',
         }}>
           {sec.b > 0 && sec.h > 0
-            ? <SimpleBeamDiagram section={secD} rebar={reb} fy={mat.fy} width={310} height={370}/>
+            ? <SimpleBeamDiagram section={secD} rebar={reb} fy={mat.fy} width={310} height={240}/>
             : <span style={{ fontSize: '0.75rem', color: 'var(--text-disabled)', fontFamily: 'var(--font-mono)' }}>
                 b, h 값을 입력하면 단면도가 표시됩니다
               </span>
+          }
+        </div>
+
+        {/* ── 하단: 변형률 + 힘 다이어그램 (삽도) ── */}
+        <div style={{
+          flex: '0 0 42%',
+          display: 'flex', alignItems: 'stretch',
+          overflow: 'hidden',
+          minHeight: 0,
+          background: '#ffffff',
+        }}>
+          {sec.b > 0 && sec.h > 0 && secD.d > 0 && cDiag > 0
+            ? <StrainForceDiagram
+                b={sec.b} h={sec.h} d={secD.d}
+                c={cDiag} a={aDiag} As={As}
+                fy={mat.fy} fck={mat.fck}
+                Et={etDiag} Ey={eyDiag}
+                width={340} height={190}
+              />
+            : <div style={{
+                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '0.65rem', color: 'var(--text-disabled)', fontFamily: 'var(--font-mono)',
+                background: 'var(--surface-2)',
+              }}>
+                Strain / Forces Diagram
+              </div>
           }
         </div>
 
