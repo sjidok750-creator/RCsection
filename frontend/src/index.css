@@ -92,12 +92,13 @@ label {
   font-size: 0.72rem;
   font-weight: 600;
   color: var(--text-2);
+  font-family: var(--font-mono);
   letter-spacing: -0.01em;
   white-space: nowrap;
 }
 
 /* ── 버튼 기본 ── */
-button { font-family: inherit; }
+button { font-family: var(--font-mono); }
 
 /* ── 트리 항목 호버 ── */
 .tree-item:hover { background: var(--surface-3) !important; }

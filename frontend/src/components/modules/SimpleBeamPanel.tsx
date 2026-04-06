@@ -1018,7 +1018,7 @@ export default function SimpleBeamPanel() {
                 c={cDiag} a={aDiag} As={As}
                 fy={mat.fy} fck={mat.fck}
                 Et={etDiag} Ey={eyDiag}
-                width={340} height={190}
+                width={560} height={230}
               />
             : <div style={{
                 flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
