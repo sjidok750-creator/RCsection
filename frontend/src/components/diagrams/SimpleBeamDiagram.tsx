@@ -9,8 +9,6 @@ interface Props {
   section: SectionInput
   rebar: ReinforcementInput
   fy?: number
-  width?: number
-  height?: number
 }
 
 // ────────────────────────────────────────────────────────────
@@ -27,7 +25,6 @@ interface Props {
 // ────────────────────────────────────────────────────────────
 export default function SimpleBeamDiagram({
   section, rebar, fy = 400,
-  width = 800, height = 975,
 }: Props) {
   const mono = 'JetBrains Mono, Consolas, monospace'
   // fy ≤ 300MPa (SD300 이하) → D, 초과 → H
@@ -35,24 +32,23 @@ export default function SimpleBeamDiagram({
 
   const has2ndRow  = rebar.tension.length >= 2 && (rebar.tension[1]?.count ?? 0) > 0
 
-  // ── 레이아웃 패딩 (2.5배 기준) ─────────────────────────────
-  const padL = 95
-  const padR = has2ndRow ? 135 : 95
-  const padT = 30
+  // ── 단면 비율에 맞춰 viewBox를 동적 계산 ──────────────────
+  // 단면 그리기 크기를 고정(drawW=600)하고 비율대로 높이 결정
+  // → viewBox가 단면에 딱 맞으므로 부모 영역을 꽉 채움
+  const drawW = 600
+  const drawH = drawW * (section.h / section.b)  // 원래 비율 유지
+
+  const padL = 60
+  const padR = has2ndRow ? 80 : 60
+  const padT = 20
   const rebarRowCount = rebar.tension.filter((_, i) => i === 0 || (rebar.tension[1]?.count ?? 0) > 0).length
-  const padB = 80 + rebarRowCount * 35
+  const padB = 50 + rebarRowCount * 24
 
-  const sw = width - padL - padR
-  const sh = height - padT - padB
+  const width  = drawW + padL + padR
+  const height = drawH + padT + padB
 
-  // 원래 비율 그대로 유지
-  const aspectRatio = section.h / section.b
-  let drawW = sw
-  let drawH = sw * aspectRatio
-  if (drawH > sh) { drawH = sh; drawW = sh / aspectRatio }
-
-  const ox = padL + (sw - drawW) / 2
-  const oy = padT + (sh - drawH) / 2
+  const ox = padL
+  const oy = padT
 
   const scaleX = drawW / section.b
   const scaleY = drawH / section.h
@@ -60,7 +56,7 @@ export default function SimpleBeamDiagram({
   const coverMm   = section.cover
   const stirrupMm = rebar.stirrup_dia
   const barScale  = Math.min(scaleX, scaleY)
-  const barR = (dia: number) => Math.max((dia / 2) * barScale * 0.78, 5)
+  const barR = (dia: number) => Math.max((dia / 2) * barScale * 0.7, 4)
 
   // ── 인장철근 개수 결정 ──────────────────────────────────────
   const resolveBarCount = (layer: typeof rebar.tension[0]): number => {
@@ -173,11 +169,11 @@ export default function SimpleBeamDiagram({
   }
 
   // ── 치수선 x 좌표 ───────────────────────────────────────────
-  const hLineX   = ox - padL + 20          // h 치수선 (최좌측)
-  const dLineX   = ox + drawW + 25         // d 치수선 (우측 1열)
-  const dPLX     = ox + drawW + 65         // d' 치수선 (우측 2열, 2단 배근 시)
-  const dPLX_L   = ox - 35                 // d' 치수선 (좌측, 압축철근 있을 때)
-  const bLineY   = oy + drawH + 35         // b 치수선 (하단)
+  const hLineX   = ox - padL + 12          // h 치수선 (최좌측)
+  const dLineX   = ox + drawW + 16         // d 치수선 (우측 1열)
+  const dPLX     = ox + drawW + 44         // d' 치수선 (우측 2열, 2단 배근 시)
+  const dPLX_L   = ox - 22                 // d' 치수선 (좌측, 압축철근 있을 때)
+  const bLineY   = oy + drawH + 22         // b 치수선 (하단)
 
   const CLR_DARK = '#1a2a4a'
   const CLR_D2   = '#3a5080'   // d' 색 (2단)
@@ -248,7 +244,7 @@ export default function SimpleBeamDiagram({
       <line x1={hLineX} y1={oy} x2={hLineX} y2={oy+drawH}
         stroke={CLR_GRAY} strokeWidth="0.9" markerStart="url(#arG0)" markerEnd="url(#arG1)"/>
       <text x={hLineX} y={oy+drawH/2} textAnchor="middle" fill={CLR_GRAY}
-        fontSize="24" fontFamily={mono} fontWeight="700"
+        fontSize="16" fontFamily={mono} fontWeight="700"
         transform={`rotate(-90,${hLineX},${oy+drawH/2})`}>h={section.h}</text>
 
       {/* ── d 치수선 (우측 1열: 상단 → 도심) ── */}
@@ -258,8 +254,8 @@ export default function SimpleBeamDiagram({
           <line x1={ox+drawW} y1={dPx}  x2={dLineX+2} y2={dPx}  stroke="#9ba3b2" strokeWidth="0.5" strokeDasharray="2 1.5"/>
           <line x1={dLineX} y1={oy} x2={dLineX} y2={dPx}
             stroke={CLR_DARK} strokeWidth="1.0" markerStart="url(#arD0)" markerEnd="url(#arD1)"/>
-          <text x={dLineX+8} y={(oy+dPx)/2+8}
-            fill={CLR_DARK} fontSize="28" fontFamily={mono} fontWeight="800" textAnchor="start">d</text>
+          <text x={dLineX+6} y={(oy+dPx)/2+6}
+            fill={CLR_DARK} fontSize="20" fontFamily={mono} fontWeight="800" textAnchor="start">d</text>
         </>
       )}
 
@@ -274,8 +270,8 @@ export default function SimpleBeamDiagram({
           <line x1={dPLX} y1={dPx} x2={dPLX} y2={t2BarCy}
             stroke={CLR_D2} strokeWidth="0.9" markerStart="url(#arD20)" markerEnd="url(#arD21)"/>
           {/* 레이블 */}
-          <text x={dPLX+8} y={(dPx+t2BarCy)/2+8}
-            fill={CLR_D2} fontSize="24" fontFamily={mono} fontWeight="700" textAnchor="start">d'</text>
+          <text x={dPLX+6} y={(dPx+t2BarCy)/2+6}
+            fill={CLR_D2} fontSize="16" fontFamily={mono} fontWeight="700" textAnchor="start">d'</text>
         </>
       )}
 
@@ -286,8 +282,8 @@ export default function SimpleBeamDiagram({
           <line x1={ox} y1={dPrimePx_comp} x2={dPLX_L-2} y2={dPrimePx_comp} stroke="#9ba3b2" strokeWidth="0.4" strokeDasharray="2 1.5"/>
           <line x1={dPLX_L} y1={oy} x2={dPLX_L} y2={dPrimePx_comp}
             stroke="#7a6030" strokeWidth="0.9" markerStart="url(#arD20)" markerEnd="url(#arD21)"/>
-          <text x={dPLX_L-6} y={(oy+dPrimePx_comp)/2+8}
-            fill="#7a6030" fontSize="24" fontFamily={mono} fontWeight="700" textAnchor="end">d'</text>
+          <text x={dPLX_L-4} y={(oy+dPrimePx_comp)/2+6}
+            fill="#7a6030" fontSize="16" fontFamily={mono} fontWeight="700" textAnchor="end">d'</text>
         </>
       )}
 
@@ -296,8 +292,8 @@ export default function SimpleBeamDiagram({
       <line x1={ox+drawW}  y1={oy+drawH} x2={ox+drawW}  y2={bLineY+2} stroke="#9ba3b2" strokeWidth="0.45" strokeDasharray="2 1.5"/>
       <line x1={ox} y1={bLineY} x2={ox+drawW} y2={bLineY}
         stroke={CLR_GRAY} strokeWidth="0.9" markerStart="url(#arG0)" markerEnd="url(#arG1)"/>
-      <text x={ox+drawW/2} y={bLineY+24}
-        textAnchor="middle" fill={CLR_GRAY} fontSize="24" fontFamily={mono} fontWeight="700">
+      <text x={ox+drawW/2} y={bLineY+16}
+        textAnchor="middle" fill={CLR_GRAY} fontSize="16" fontFamily={mono} fontWeight="700">
         b={section.b}
       </text>
 
@@ -331,14 +327,14 @@ export default function SimpleBeamDiagram({
 
       {/* ── 하단 철근 레이블 (b 치수선 아래) ── */}
       {t1Label && (
-        <text x={ox + drawW / 2} y={bLineY + 52}
-          textAnchor="middle" fill="#1a2040" fontSize="21" fontFamily={mono} fontWeight="700">
+        <text x={ox + drawW / 2} y={bLineY + 36}
+          textAnchor="middle" fill="#1a2040" fontSize="14" fontFamily={mono} fontWeight="700">
           {t1Label}
         </text>
       )}
       {t2Label && (
-        <text x={ox + drawW / 2} y={bLineY + 82}
-          textAnchor="middle" fill={CLR_D2} fontSize="21" fontFamily={mono} fontWeight="700">
+        <text x={ox + drawW / 2} y={bLineY + 56}
+          textAnchor="middle" fill={CLR_D2} fontSize="14" fontFamily={mono} fontWeight="700">
           {t2Label}
         </text>
       )}
@@ -350,8 +346,8 @@ export default function SimpleBeamDiagram({
         const cnt = rebar.compression[0]?.count ?? 0
         const label = `${cnt > 0 ? `${cnt}-` : ''}${rebarPrefix}${cDiaMm}`
         return (
-          <text x={cx} y={firstBar.cy + firstBar.r + 20}
-            textAnchor="middle" fill="#1a2040" fontSize="21" fontFamily={mono} fontWeight="700">
+          <text x={cx} y={firstBar.cy + firstBar.r + 14}
+            textAnchor="middle" fill="#1a2040" fontSize="14" fontFamily={mono} fontWeight="700">
             {label}
           </text>
         )
@@ -363,7 +359,7 @@ export default function SimpleBeamDiagram({
         const lx = ox + drawW * 0.78
         const ly = oy + drawH / 2
         return (
-          <text x={lx} y={ly} fill="#1a6030" fontSize="18" fontFamily={mono} fontWeight="700"
+          <text x={lx} y={ly} fill="#1a6030" fontSize="13" fontFamily={mono} fontWeight="700"
             textAnchor="middle" transform={`rotate(-90,${lx},${ly})`}>{label}</text>
         )
       })()}
