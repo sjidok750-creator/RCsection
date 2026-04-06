@@ -29,12 +29,16 @@ interface ColumnSectionInput {
   coverMode: 'stirrup' | 'center'
 }
 
-type Arrangement = '2-face' | '4-face'
-
+// 면별 배근 입력 (코너 4개 고정, 각 면은 코너 사이 추가 개수)
 interface ColumnRebarInput {
-  count: number        // 총 주근 개수
   dia: number          // 주근 직경
-  arrangement: Arrangement  // 대칭배근 방식
+  // 직사각형: 각 면 코너 제외 중간 개수
+  nTop: number         // 상단 (좌상단~우상단 코너 사이)
+  nBot: number         // 하단 (좌하단~우하단 코너 사이)
+  nLeft: number        // 좌측 (상단~하단 코너 사이)
+  nRight: number       // 우측 (상단~하단 코너 사이)
+  // 원형: 총 개수
+  nCircular: number
 }
 
 interface ColumnTieInput {
@@ -49,6 +53,7 @@ interface ColumnTieInput {
 }
 
 interface ColumnLoadInput {
+  name: string   // 조합 이름 (예: "최대축력", "최대모멘트")
   Pu: number     // 계수 축력 (kN), 압축 +
   Mux: number    // 계수 휨모멘트 x축 (kN·m)
   Muy: number    // 계수 휨모멘트 y축 (kN·m)
@@ -64,12 +69,79 @@ const DEFAULT_SEC: ColumnSectionInput = {
   steelShape: 'H-200\u00d7200\u00d78\u00d712', steelArea: 6353, steelFy: 275,
   cover: 40, coverMode: 'stirrup',
 }
-const DEFAULT_REB: ColumnRebarInput = { count: 8, dia: 22, arrangement: '4-face' }
+const DEFAULT_REB: ColumnRebarInput = {
+  dia: 22,
+  nTop: 2, nBot: 2, nLeft: 0, nRight: 0,
+  nCircular: 8,
+}
 const DEFAULT_TIE: ColumnTieInput = {
   transverseType: 'tie', dia: 10, spacing: 200, legs: 2,
   spiralDia: 10, spiralPitch: 50,
 }
-const DEFAULT_LOAD: ColumnLoadInput = { Pu: 0, Mux: 0, Muy: 0, Vu: 0, lu: 3000, k: 1.0 }
+const DEFAULT_LOAD: ColumnLoadInput = { name: 'LC1', Pu: 0, Mux: 0, Muy: 0, Vu: 0, lu: 3000, k: 1.0 }
+
+// 기본 4개 조합 — 실무에서 흔히 검토하는 패턴
+const DEFAULT_LOADS: ColumnLoadInput[] = [
+  { name: 'MAX-P',  Pu: 2000, Mux: 50,  Muy: 0, Vu: 80,  lu: 3000, k: 1.0 },
+  { name: 'MAX-M',  Pu: 800,  Mux: 200, Muy: 0, Vu: 120, lu: 3000, k: 1.0 },
+  { name: 'MAX-V',  Pu: 1200, Mux: 100, Muy: 0, Vu: 200, lu: 3000, k: 1.0 },
+  { name: 'MIN-P',  Pu: 200,  Mux: 150, Muy: 0, Vu: 60,  lu: 3000, k: 1.0 },
+]
+
+// ── 면별 배근 헬퍼 ────────────────────────────────────────────
+// 직사각형: 코너 4개 + 각 면 중간
+function rectRebarCount(reb: ColumnRebarInput): number {
+  return 4 + reb.nTop + reb.nBot + reb.nLeft + reb.nRight
+}
+
+// 총 개수 (shape 구분)
+function totalRebarCount(shape: ColumnShape, reb: ColumnRebarInput): number {
+  return shape === 'circular' ? reb.nCircular : rectRebarCount(reb)
+}
+
+// 직사각형 단면 철근 위치 배열 (SVG/계산 공용)
+// barCenter: 콘크리트 외면~철근 중심 픽셀/스케일 값
+// cw, ch: 단면 폭/높이 픽셀/스케일 값
+// ox, oy: 단면 좌상단 좌표
+function rectRebarPositions(
+  reb: ColumnRebarInput,
+  ox: number, oy: number,
+  cw: number, ch: number,
+  barCenter: number,
+): { cx: number; cy: number }[] {
+  const { nTop, nBot, nLeft, nRight } = reb
+  const bars: { cx: number; cy: number }[] = []
+
+  const x0 = ox + barCenter
+  const x1 = ox + cw - barCenter
+  const y0 = oy + barCenter
+  const y1 = oy + ch - barCenter
+
+  // 코너 4개
+  bars.push({ cx: x0, cy: y0 })
+  bars.push({ cx: x1, cy: y0 })
+  bars.push({ cx: x0, cy: y1 })
+  bars.push({ cx: x1, cy: y1 })
+
+  // 상단 중간
+  for (let i = 1; i <= nTop; i++) {
+    bars.push({ cx: x0 + (i / (nTop + 1)) * (x1 - x0), cy: y0 })
+  }
+  // 하단 중간
+  for (let i = 1; i <= nBot; i++) {
+    bars.push({ cx: x0 + (i / (nBot + 1)) * (x1 - x0), cy: y1 })
+  }
+  // 좌측 중간
+  for (let i = 1; i <= nLeft; i++) {
+    bars.push({ cx: x0, cy: y0 + (i / (nLeft + 1)) * (y1 - y0) })
+  }
+  // 우측 중간
+  for (let i = 1; i <= nRight; i++) {
+    bars.push({ cx: x1, cy: y0 + (i / (nRight + 1)) * (y1 - y0) })
+  }
+
+  return bars
+}
 
 // ── KDS 14 20 20/22 : 기둥 검토 엔진 ──────────────────────────
 function calcColumn(
@@ -81,7 +153,8 @@ function calcColumn(
 ): CheckResult {
   const { fck, fy, Es } = mat
   const { shape, b, h, D, cover, steelArea: As_steel, steelFy: Fy_steel } = sec
-  const { count: nBar, dia: barDia, arrangement } = reb
+  const { dia: barDia } = reb
+  const nBar = totalRebarCount(shape, reb)
   const { transverseType, dia: tieDia, spacing: tieSpacing, legs: tieLegs,
           spiralDia, spiralPitch } = tie
   const { Pu, Mux, Muy, Vu, lu, k } = load
@@ -213,16 +286,13 @@ function calcColumn(
 
   // 주어진 Pu에 대한 φMn (선형보간 간략법)
   let phiMn: number
-  let phi_pm: number
   if (Pu >= phiPb) {
-    phi_pm = phi_col
     if (phiPn_max - phiPb !== 0) {
       phiMn = phiMb * (phiPn_max - Pu) / (phiPn_max - phiPb)
     } else {
       phiMn = phiMb
     }
   } else {
-    phi_pm = phi_col
     if (phiPb !== 0) {
       phiMn = phiMb + (phiMn0 - phiMb) * (phiPb - Pu) / phiPb
     } else {
@@ -277,7 +347,6 @@ function calcColumn(
 
   // ── Shape-specific label helpers ──
   const shapeLabel = shape === 'rectangular' ? '직사각형' : shape === 'circular' ? '원형' : '합성(SRC)'
-  const dimLabel = shape === 'circular' ? `D = ${D}` : `b \u00d7 h = ${b} \u00d7 ${h}`
 
   const items: CheckItem[] = [
 
@@ -668,6 +737,378 @@ function calcColumn(
   }
 }
 
+// ── P-M 상관도 SVG 컴포넌트 ─────────────────────────────────
+// 눈금 간격 자동 계산
+function niceStep(range: number, maxTicks: number): number {
+  const raw = range / maxTicks
+  const exp = Math.pow(10, Math.floor(Math.log10(raw)))
+  return [1, 2, 5, 10].map(f => f * exp).find(s => range / s <= maxTicks) ?? exp
+}
+
+function PMDiagram({
+  mat, sec, reb, tie, load,
+  rho_g,
+}: {
+  mat: MaterialInput
+  sec: ColumnSectionInput
+  reb: ColumnRebarInput
+  tie: ColumnTieInput
+  load: ColumnLoadInput
+  rho_g: number
+}) {
+  // ── 공칭 곡선 & 설계 곡선 분리 생성 ──
+  const { fck, fy, Es } = mat
+  const { shape, b, h, D, cover } = sec
+  const { dia: barDia } = reb
+  const nBar = totalRebarCount(shape, reb)
+  const { transverseType, dia: tieDia, spiralDia } = tie
+  const transverseDia = transverseType === 'tie' ? tieDia : spiralDia
+  const Ab = REBAR_AREA[barDia] ?? 0
+  const Ast = nBar * Ab
+  const As_half = Ast / 2
+  const beta1 = fck <= 28 ? 0.85 : Math.max(0.85 - 0.007 * (fck - 28), 0.65)
+  const ey = fy / Es
+  const phi_col = transverseType === 'tie' ? 0.65 : 0.70
+  const maxAxialFactor = transverseType === 'tie' ? 0.80 : 0.85
+
+  let d_prime: number, d_val: number, Ag: number, bw: number, hDim: number
+  if (shape === 'circular') {
+    d_prime = sec.coverMode === 'center' ? cover : cover + transverseDia + barDia / 2
+    d_val = D - d_prime; Ag = Math.PI / 4 * D * D; bw = D; hDim = D
+  } else {
+    d_prime = sec.coverMode === 'center' ? cover : cover + transverseDia + barDia / 2
+    d_val = h - d_prime; Ag = b * h; bw = b; hDim = h
+  }
+  const As_steel = shape === 'composite' ? sec.steelArea : 0
+  const Fy_steel = shape === 'composite' ? sec.steelFy : 0
+  const P0 = shape === 'composite'
+    ? 0.85 * fck * (Ag - Ast - As_steel) + fy * Ast + Fy_steel * As_steel
+    : 0.85 * fck * (Ag - Ast) + fy * Ast
+  const Pn_max = P0 * 1e-3  // 공칭 최대 축력
+  const phiPn_max = maxAxialFactor * phi_col * Pn_max
+
+  // 공통 포인트 계산 (c 순회)
+  type RawPt = { Pn: number; Mn: number; phi: number; et: number }
+  const rawPts: RawPt[] = []
+  const steps = 80
+  for (let i = 0; i <= steps; i++) {
+    const c = d_val * 2.5 * (1 - i / steps) + 0.001
+    const a = Math.min(beta1 * c, hDim)
+    const Cc = 0.85 * fck * a * bw * 1e-3
+    const fs_c = Math.max(Math.min(Es * 0.003 * (c - d_prime) / c, fy), -fy)
+    const Cs = As_half * (fs_c - 0.85 * fck) * 1e-3
+    const fs_t = Math.max(Math.min(0.003 * (d_val - c) / c * Es, fy), -fy)
+    const Ts = As_half * fs_t * 1e-3
+    let Ps = 0
+    if (shape === 'composite') {
+      Ps = (c > hDim / 2 ? 1 : -1) * Fy_steel * As_steel * 1e-3
+    }
+    const Pn = Cc + Cs - Ts + Ps
+    const Mn = Math.max((Cc * (hDim / 2 - a / 2) + Cs * (hDim / 2 - d_prime) + Ts * (d_val - hDim / 2)) * 1e-3, 0)
+    const et = 0.003 * (d_val - c) / c
+    let phi: number
+    if (et >= 0.005) phi = 0.85
+    else if (et <= ey) phi = phi_col
+    else phi = phi_col + (0.85 - phi_col) * (et - ey) / (0.005 - ey)
+    rawPts.push({ Pn, Mn, phi, et })
+  }
+  // 순수인장
+  rawPts.push({ Pn: -fy * Ast * 1e-3, Mn: 0, phi: 0.90, et: Infinity })
+
+  // 공칭 곡선 (파랑)
+  interface CurvePoint { P: number; M: number }
+  const nominalCurve: CurvePoint[] = [
+    { P: Pn_max, M: 0 },
+    ...rawPts.map(p => ({ P: Math.min(p.Pn, Pn_max), M: p.Mn })),
+  ]
+  // 설계 곡선 (빨강)
+  const designCurve: CurvePoint[] = [
+    { P: phiPn_max, M: 0 },
+    ...rawPts.map(p => ({ P: Math.min(p.phi * p.Pn, phiPn_max), M: Math.max(p.phi * p.Mn, 0) })),
+  ]
+
+  // 균형파괴점 (설계곡선 기준 M 최대점)
+  const balIdx = designCurve.reduce((bi, pt, i) => pt.M > designCurve[bi].M ? i : bi, 0)
+  const balPt = designCurve[balIdx]
+
+  // 하중점
+  const Pu = load.Pu
+  const Mu = Math.sqrt(load.Mux ** 2 + load.Muy ** 2)
+
+  // 편심 e = Mu/Pu, 편심 직선: P = Pu/Mu * M (원점 통과)
+  const ecc = Pu > 0 && Mu > 0 ? Mu / Pu : null  // m 단위로 보면 kN·m/kN = m
+
+  // 설계 곡선에서 해당 편심선과의 교점 → φPn, φMn
+  // 편심선: P = (Pu/Mu)*M  ↔  각도 θ = atan(Pu/Mu)
+  // 곡선 각 구간에서 교점 탐색
+  let capPt: CurvePoint | null = null
+  if (Mu > 0 && Pu >= 0) {
+    const slope = Pu / Mu  // P/M 비율
+    for (let i = 1; i < designCurve.length; i++) {
+      const a = designCurve[i - 1], b2 = designCurve[i]
+      // 구간 내 P = slope * M 교점
+      const dM = b2.M - a.M, dP = b2.P - a.P
+      if (Math.abs(dM * slope - dP) < 1e-9) continue
+      const t = (slope * a.M - a.P) / (dP - slope * dM)
+      if (t >= 0 && t <= 1) {
+        const iM = a.M + t * dM
+        const iP = a.P + t * dP
+        if (iM >= 0 && iP >= 0) { capPt = { P: iP, M: iM }; break }
+      }
+    }
+  }
+
+  // SF = capPt.P / Pu (같은 편심에서 capacity / demand)
+  const SF = capPt && Pu > 0 ? capPt.P / Pu : (capPt ? Infinity : null)
+
+  // 내부/외부 판정
+  const inside = capPt ? Pu <= capPt.P : false
+
+  // ── 좌표 범위 ──
+  const allP = [...nominalCurve.map(p => p.P), ...designCurve.map(p => p.P), Pu]
+  const allM = [...nominalCurve.map(p => p.M), ...designCurve.map(p => p.M), Mu]
+  const maxPraw = Math.max(...allP)
+  const minPraw = Math.min(...allP, -maxPraw * 0.15)
+  const maxMraw = Math.max(...allM) * 1.05 || 100
+
+  const pStep = niceStep(maxPraw - minPraw, 7)
+  const pMin = Math.floor(minPraw / pStep) * pStep
+  const pMax = Math.ceil(maxPraw / pStep + 0.5) * pStep
+  const mStep = niceStep(maxMraw, 6)
+  const mMax = Math.ceil(maxMraw / mStep + 0.3) * mStep
+
+  // SVG 크기 — viewBox만 고정, 실제 렌더링은 100%
+  const VW = 400, VH = 320
+  const padL = 52, padR = 12, padT = 10, padB = 28
+  const W = VW - padL - padR
+  const H = VH - padT - padB
+
+  const toX = (m: number) => padL + (m / mMax) * W
+  const toY = (p: number) => padT + H - ((p - pMin) / (pMax - pMin)) * H
+
+  const makePath = (pts: CurvePoint[]) =>
+    pts.map((pt, i) => `${i === 0 ? 'M' : 'L'}${toX(pt.M).toFixed(1)},${toY(pt.P).toFixed(1)}`).join(' ')
+
+  const nomPath = makePath(nominalCurve)
+  const desPath = makePath(designCurve)
+
+  // 눈금
+  const pTicks: number[] = []
+  for (let v = Math.ceil(pMin / pStep) * pStep; v <= pMax + 1; v += pStep) pTicks.push(Math.round(v))
+  const mTicks: number[] = []
+  for (let v = 0; v <= mMax + 1; v += mStep) mTicks.push(Math.round(v))
+
+  const fmt = (v: number) => Math.abs(v) >= 10000 ? `${Math.round(v / 1000)}k` : `${Math.round(v)}`
+
+  // 편심선 끝점 (플롯 경계까지)
+  const eccLineEnd: CurvePoint | null = ecc && Pu > 0
+    ? (() => {
+        const slope = Pu / Mu
+        const mEnd = Math.min(mMax, pMax / slope)
+        return { M: mEnd, P: slope * mEnd }
+      })()
+    : null
+
+  return (
+    <svg viewBox={`0 0 ${VW} ${VH}`} width="100%" height="100%"
+      preserveAspectRatio="xMidYMid meet"
+      style={{ display: 'block' }}>
+      <defs>
+        <clipPath id="pm-clip2">
+          <rect x={padL} y={padT} width={W} height={H}/>
+        </clipPath>
+      </defs>
+
+      {/* 배경 */}
+      <rect x={padL} y={padT} width={W} height={H} fill="#ffffff"/>
+
+      {/* ── 격자선 (촘촘) ── */}
+      {pTicks.map(v => {
+        const y = toY(v); if (y < padT - 1 || y > padT + H + 1) return null
+        return <line key={`pg-${v}`} clipPath="url(#pm-clip2)"
+          x1={padL} y1={y} x2={padL + W} y2={y}
+          stroke={v === 0 ? '#8898b0' : '#dde3ec'} strokeWidth={v === 0 ? 1 : 0.5}
+          strokeDasharray={v === 0 ? '4 3' : undefined}/>
+      })}
+      {mTicks.map(v => (
+        <line key={`mg-${v}`} clipPath="url(#pm-clip2)"
+          x1={toX(v)} y1={padT} x2={toX(v)} y2={padT + H}
+          stroke={v === 0 ? '#8898b0' : '#dde3ec'} strokeWidth="0.5"/>
+      ))}
+
+      {/* ── 편심 직선 (원점 → 하중점 방향, 빨간 점선) ── */}
+      {eccLineEnd && (
+        <line clipPath="url(#pm-clip2)"
+          x1={toX(0)} y1={toY(0)}
+          x2={toX(eccLineEnd.M)} y2={toY(eccLineEnd.P)}
+          stroke="#cc2222" strokeWidth="1" strokeDasharray="5 3"/>
+      )}
+
+      {/* ── 공칭 곡선 (파랑 실선) ── */}
+      <path d={nomPath} fill="none"
+        stroke="#2255cc" strokeWidth="1.8" strokeLinejoin="round"
+        clipPath="url(#pm-clip2)"/>
+
+      {/* ── 설계 곡선 (빨강 실선) ── */}
+      <path d={desPath} fill="none"
+        stroke="#cc2222" strokeWidth="1.5" strokeLinejoin="round"
+        clipPath="url(#pm-clip2)"/>
+
+      {/* ── 균형파괴점 (설계) ── */}
+      <circle cx={toX(balPt.M)} cy={toY(balPt.P)} r="3"
+        fill="#cc2222" stroke="#fff" strokeWidth="1"
+        clipPath="url(#pm-clip2)"/>
+      {/* eb 레이블 */}
+      {balPt.M > 0 && balPt.P > 0 && (
+        <text x={toX(balPt.M) + 5} y={toY(balPt.P) - 3}
+          fontSize="8" fontFamily="var(--font-mono)" fill="#cc2222" fontWeight="600">
+          eb={(balPt.M / balPt.P * 1000).toFixed(0)}mm
+        </text>
+      )}
+
+      {/* ── 설계곡선 교점 (φPn, φMn) ── */}
+      {capPt && (
+        <>
+          {/* 교점 마커 */}
+          <circle cx={toX(capPt.M)} cy={toY(capPt.P)} r="3.5"
+            fill="#2255cc" stroke="#fff" strokeWidth="1"
+            clipPath="url(#pm-clip2)"/>
+          {/* 교점 좌표 레이블 */}
+          <text x={toX(capPt.M) + 6} y={toY(capPt.P) - 6}
+            fontSize="7.5" fontFamily="var(--font-mono)" fill="#2255cc" fontWeight="700">
+            ({Math.round(capPt.P)}, {Math.round(capPt.M)})
+          </text>
+          {/* 교점→하중점 수직 보조선 */}
+          <line clipPath="url(#pm-clip2)"
+            x1={toX(capPt.M)} y1={toY(capPt.P)}
+            x2={toX(Mu)} y2={toY(Pu)}
+            stroke="#888" strokeWidth="0.6" strokeDasharray="3 2"/>
+        </>
+      )}
+
+      {/* ── 하중점 (빨간 십자 마커) ── */}
+      {(() => {
+        const cx = toX(Mu), cy = toY(Pu)
+        const arm = 6
+        return (
+          <g clipPath="url(#pm-clip2)">
+            <line x1={cx - arm} y1={cy} x2={cx + arm} y2={cy}
+              stroke="#cc2222" strokeWidth="1.5"/>
+            <line x1={cx} y1={cy - arm} x2={cx} y2={cy + arm}
+              stroke="#cc2222" strokeWidth="1.5"/>
+            {/* 하중점 좌표 */}
+            <text x={cx + 8} y={cy + 4}
+              fontSize="7.5" fontFamily="var(--font-mono)" fill="#cc2222" fontWeight="700">
+              ({Math.round(Pu)}, {Math.round(Mu)})
+            </text>
+          </g>
+        )
+      })()}
+
+      {/* ── θ 각도 표시 (원점에서 편심선 각도) ── */}
+      {Mu > 0 && Pu > 0 && (
+        <text x={toX(mMax * 0.12)} y={toY(Pu / Mu * mMax * 0.12) - 5}
+          fontSize="7.5" fontFamily="var(--font-mono)" fill="#cc2222">
+          θ={(Math.atan(Pu / Mu) * 180 / Math.PI).toFixed(1)}°
+        </text>
+      )}
+
+      {/* ── φPn,max 수평선 ── */}
+      <line clipPath="url(#pm-clip2)"
+        x1={padL} y1={toY(phiPn_max)} x2={padL + W} y2={toY(phiPn_max)}
+        stroke="#2255cc" strokeWidth="0.7" strokeDasharray="4 3" opacity="0.6"/>
+      <text x={padL + 3} y={toY(phiPn_max) - 2}
+        fontSize="7" fontFamily="var(--font-mono)" fill="#2255cc" opacity="0.8">
+        φPn,max={Math.round(phiPn_max)}
+      </text>
+
+      {/* ── 테두리 ── */}
+      <rect x={padL} y={padT} width={W} height={H}
+        fill="none" stroke="#8898b0" strokeWidth="1"/>
+
+      {/* ── Y축 눈금 ── */}
+      {pTicks.map(v => {
+        const y = toY(v); if (y < padT - 1 || y > padT + H + 1) return null
+        return (
+          <g key={`pt-${v}`}>
+            <line x1={padL - 4} y1={y} x2={padL} y2={y} stroke="#5a6480" strokeWidth="0.8"/>
+            <text x={padL - 6} y={y + 3.5} textAnchor="end"
+              fontSize="7.5" fontFamily="var(--font-mono)"
+              fontWeight={v === 0 ? 700 : 400} fill={v === 0 ? '#1a1f2e' : '#5a6480'}>
+              {fmt(v)}
+            </text>
+          </g>
+        )
+      })}
+
+      {/* ── X축 눈금 ── */}
+      {mTicks.map(v => {
+        const x = toX(v)
+        return (
+          <g key={`mt-${v}`}>
+            <line x1={x} y1={padT + H} x2={x} y2={padT + H + 3} stroke="#5a6480" strokeWidth="0.8"/>
+            <text x={x} y={padT + H + 12} textAnchor="middle"
+              fontSize="7" fontFamily="var(--font-mono)" fill="#5a6480">
+              {fmt(v)}
+            </text>
+          </g>
+        )
+      })}
+
+      {/* ── 축 제목 ── */}
+      <text x={padL - 40} y={padT + H / 2} textAnchor="middle"
+        fontSize="8.5" fontFamily="var(--font-mono)" fontWeight="700" fill="#3a4155"
+        transform={`rotate(-90,${padL - 40},${padT + H / 2})`}>
+        P (kN)
+      </text>
+      <text x={padL + W / 2} y={VH - 2} textAnchor="middle"
+        fontSize="8.5" fontFamily="var(--font-mono)" fontWeight="700" fill="#3a4155">
+        M (kN·m)
+      </text>
+
+      {/* ── 범례 ── */}
+      <g transform={`translate(${padL + W - 110},${padT + 4})`}>
+        <rect x="0" y="0" width="108" height="38"
+          fill="white" fillOpacity="0.92" stroke="#c8cdd6" strokeWidth="0.7" rx="1"/>
+        <line x1="5" y1="10" x2="20" y2="10" stroke="#2255cc" strokeWidth="1.8"/>
+        <text x="24" y="13" fontSize="7.5" fontFamily="var(--font-mono)" fontWeight="600" fill="#2255cc">Nominal (Pn-Mn)</text>
+        <line x1="5" y1="24" x2="20" y2="24" stroke="#cc2222" strokeWidth="1.5"/>
+        <text x="24" y="27" fontSize="7.5" fontFamily="var(--font-mono)" fontWeight="600" fill="#cc2222">Design (φPn-φMn)</text>
+      </g>
+
+      {/* ── 하단 정보 박스 ── */}
+      <g transform={`translate(${padL},${padT + H + 14})`}>
+        {/* ρ */}
+        <text x="0" y="10" fontSize="8" fontFamily="var(--font-mono)" fill="#3a4155">
+          ρ = {rho_g.toFixed(4)}
+        </text>
+        {capPt && (
+          <>
+            <text x={W * 0.22} y="10" fontSize="8" fontFamily="var(--font-mono)" fill="#2255cc">
+              φPn = {Math.round(capPt.P)} kN
+            </text>
+            <text x={W * 0.5} y="10" fontSize="8" fontFamily="var(--font-mono)" fill="#cc2222">
+              Pu = {Math.round(Pu)} kN
+            </text>
+            <text x={W * 0.22} y="20" fontSize="8" fontFamily="var(--font-mono)" fill="#2255cc">
+              φMn = {Math.round(capPt.M)} kN·m
+            </text>
+            <text x={W * 0.5} y="20" fontSize="8" fontFamily="var(--font-mono)" fill="#cc2222">
+              Mu = {Math.round(Mu)} kN·m
+            </text>
+            {SF !== null && (
+              <text x={W * 0.76} y="15" fontSize="9" fontFamily="var(--font-mono)"
+                fontWeight="700" fill={inside ? '#1a7a3c' : '#c41a1a'}>
+                F.S = {isFinite(SF) ? SF.toFixed(2) : '∞'}  {inside ? 'O.K' : 'N.G'}
+              </text>
+            )}
+          </>
+        )}
+      </g>
+    </svg>
+  )
+}
+
 // ── 공용 스타일 ─────────────────────────────────────────────
 const S = {
   row: {
@@ -812,7 +1253,8 @@ function ColumnDiagram({ sec, reb, tie, width = 310, height = 370 }: {
   height?: number
 }) {
   const { shape, b, h, D, cover, coverMode, steelShape } = sec
-  const { count: nBar, dia: barDia, arrangement } = reb
+  const { dia: barDia } = reb
+  const nBar = totalRebarCount(shape, reb)
   const { transverseType, dia: tieDia, spiralDia, spiralPitch } = tie
 
   const transverseDia = transverseType === 'tie' ? tieDia : spiralDia
@@ -839,54 +1281,9 @@ function ColumnDiagram({ sec, reb, tie, width = 310, height = 370 }: {
       ? cover * scale
       : (cover + transverseDia + barDia / 2) * scale
 
-    // 철근 위치 계산
+    // 철근 위치 계산 — 헬퍼 사용
     const barR = Math.max(barDia * scale / 2, 3)
-    const bars: { cx: number; cy: number }[] = []
-
-    if (arrangement === '2-face') {
-      const nTop = Math.ceil(nBar / 2)
-      const nBot = nBar - nTop
-      for (let i = 0; i < nTop; i++) {
-        const x = ox + barCenter + (i / Math.max(nTop - 1, 1)) * (cw - 2 * barCenter)
-        bars.push({ cx: nTop === 1 ? ox + cw / 2 : x, cy: oy + barCenter })
-      }
-      for (let i = 0; i < nBot; i++) {
-        const x = ox + barCenter + (i / Math.max(nBot - 1, 1)) * (cw - 2 * barCenter)
-        bars.push({ cx: nBot === 1 ? ox + cw / 2 : x, cy: oy + ch - barCenter })
-      }
-    } else {
-      const nCorner = 4
-      const nRemain = nBar - nCorner
-      const nPerFaceH = Math.floor(nRemain / 4)
-      const nPerFaceV = Math.ceil(nRemain / 4)
-      const nLeft = nPerFaceV
-      const nRight = nRemain - nPerFaceH * 2 - nPerFaceV
-
-      const corners = [
-        { cx: ox + barCenter, cy: oy + barCenter },
-        { cx: ox + cw - barCenter, cy: oy + barCenter },
-        { cx: ox + barCenter, cy: oy + ch - barCenter },
-        { cx: ox + cw - barCenter, cy: oy + ch - barCenter },
-      ]
-      bars.push(...corners)
-
-      for (let i = 1; i <= nPerFaceH; i++) {
-        const x = ox + barCenter + (i / (nPerFaceH + 1)) * (cw - 2 * barCenter)
-        bars.push({ cx: x, cy: oy + barCenter })
-      }
-      for (let i = 1; i <= nPerFaceH; i++) {
-        const x = ox + barCenter + (i / (nPerFaceH + 1)) * (cw - 2 * barCenter)
-        bars.push({ cx: x, cy: oy + ch - barCenter })
-      }
-      for (let i = 1; i <= nLeft; i++) {
-        const y = oy + barCenter + (i / (nLeft + 1)) * (ch - 2 * barCenter)
-        bars.push({ cx: ox + barCenter, cy: y })
-      }
-      for (let i = 1; i <= nRight; i++) {
-        const y = oy + barCenter + (i / (nRight + 1)) * (ch - 2 * barCenter)
-        bars.push({ cx: ox + cw - barCenter, cy: y })
-      }
-    }
+    const bars = rectRebarPositions(reb, ox, oy, cw, ch, barCenter)
 
     const Ast = nBar * (REBAR_AREA[barDia] ?? 0)
 
@@ -986,7 +1383,7 @@ function ColumnDiagram({ sec, reb, tie, width = 310, height = 370 }: {
         <text x={width / 2} y={height - 5}
           textAnchor="middle" fontSize="9" fill="var(--text-3)"
           fontFamily="var(--font-mono)">
-          {nBar}-D{barDia} ({arrangement})  Ast = {Math.round(Ast)} mm²
+          {nBar}-D{barDia}  Ast = {Math.round(Ast)} mm²
           {shape === 'composite' ? `  [${steelShape}]` : ''}
         </text>
       </svg>
@@ -1090,17 +1487,62 @@ function ColumnDiagram({ sec, reb, tie, width = 310, height = 370 }: {
 
 // ── 메인 패널 ───────────────────────────────────────────────
 export default function ColumnPanel() {
-  const { isMobile, isCompact } = useResponsive()
+  const { isCompact } = useResponsive()
   const [mat, setMat] = useState<MaterialInput>(DEFAULT_MAT)
   const [sec, setSec] = useState<ColumnSectionInput>(DEFAULT_SEC)
   const [reb, setReb] = useState<ColumnRebarInput>(DEFAULT_REB)
   const [tie, setTie] = useState<ColumnTieInput>(DEFAULT_TIE)
-  const [load, setLoad] = useState<ColumnLoadInput>(DEFAULT_LOAD)
+  const [loads, setLoads] = useState<ColumnLoadInput[]>(DEFAULT_LOADS)
+  const [activeLoadIdx, setActiveLoadIdx] = useState(0)
   const [activeTab, setActiveTab] = useState<'input' | 'section' | 'result'>('input')
+  const [activeResultIdx, setActiveResultIdx] = useState(0)  // 결과 패널에서 선택된 조합
 
-  const result = calcColumn(mat, sec, reb, tie, load)
+  const load = loads[activeLoadIdx] ?? loads[0]
 
-  const Ast = reb.count * (REBAR_AREA[reb.dia] ?? 0)
+  // 모든 조합 계산
+  const allResults = loads.map(l => calcColumn(mat, sec, reb, tie, l))
+
+  // 결과 패널에서 선택된 조합 결과
+  const result = allResults[activeResultIdx] ?? allResults[0]
+
+  // rho_g (단면 기반, 조합 무관)
+  const _Ag = sec.shape === 'circular'
+    ? Math.PI / 4 * sec.D * sec.D
+    : sec.b * sec.h
+  const _nBar = totalRebarCount(sec.shape, reb)
+  const _Ast = _nBar * (REBAR_AREA[reb.dia] ?? 0)
+  const rho_g = _Ag > 0 ? _Ast / _Ag : 0
+
+  // 전체 worst-case 판정
+  const worstStatus: 'OK' | 'NG' | 'WARN' = allResults.some(r => r.overallStatus === 'NG')
+    ? 'NG'
+    : allResults.some(r => r.overallStatus === 'WARN')
+    ? 'WARN'
+    : 'OK'
+
+  // 하중 조합 추가
+  const addLoad = () => {
+    const n = loads.length + 1
+    const newLoad: ColumnLoadInput = { ...DEFAULT_LOAD, name: `LC${n}` }
+    setLoads(prev => [...prev, newLoad])
+    setActiveLoadIdx(loads.length)
+  }
+
+  // 하중 조합 삭제
+  const removeLoad = (idx: number) => {
+    if (loads.length <= 1) return
+    setLoads(prev => prev.filter((_, i) => i !== idx))
+    setActiveLoadIdx(prev => Math.min(prev, loads.length - 2))
+    setActiveResultIdx(prev => Math.min(prev, loads.length - 2))
+  }
+
+  // 현재 조합 업데이트
+  const updateLoad = (updater: (l: ColumnLoadInput) => ColumnLoadInput) => {
+    setLoads(prev => prev.map((l, i) => i === activeLoadIdx ? updater(l) : l))
+  }
+
+  const nBar = totalRebarCount(sec.shape, reb)
+  const Ast = nBar * (REBAR_AREA[reb.dia] ?? 0)
   const transverseDia = tie.transverseType === 'tie' ? tie.dia : tie.spiralDia
 
   // Shape-dependent computed values for display
@@ -1192,13 +1634,17 @@ export default function ColumnPanel() {
       : [['b \u00d7 h', `${sec.b}\u00d7${sec.h}`] as [string, string]]
     ),
     ['d / d\'', `${d > 0 ? d.toFixed(0) : '-'} / ${d_prime.toFixed(0)}`],
-    ['주근', `${reb.count}-D${reb.dia} (${sec.shape === 'circular' ? '원형' : reb.arrangement})`],
+    ['주근', sec.shape === 'circular'
+      ? `${reb.nCircular}-D${reb.dia} (원형)`
+      : `${nBar}-D${reb.dia} (T${reb.nTop}/B${reb.nBot}/L${reb.nLeft}/R${reb.nRight}+4코너)`
+    ],
     ['Ast', `${Math.round(Ast)} mm\u00b2`],
     ...(tie.transverseType === 'tie'
       ? [['타이', `D${tie.dia}@${tie.spacing}-${tie.legs}leg`] as [string, string]]
       : [['나선', `D${tie.spiralDia}@${tie.spiralPitch}`] as [string, string]]
     ),
-    ['하중', `Pu=${load.Pu} / Mu=${Math.sqrt(load.Mux ** 2 + load.Muy ** 2).toFixed(0)}`],
+    ['조합수', `${loads.length}개`],
+    ['하중(현)', `Pu=${load.Pu} / Mu=${Math.sqrt(load.Mux ** 2 + load.Muy ** 2).toFixed(0)}`],
     ...(sec.shape === 'composite'
       ? [['강재', `${sec.steelArea} mm\u00b2`] as [string, string]]
       : []
@@ -1352,24 +1798,142 @@ export default function ColumnPanel() {
 
           {/* 주근 */}
           <GroupHeader title="Longitudinal Rebar" sub="주근"/>
-          {sec.shape !== 'circular' && (
-            <Row label="배근 방식">
-              <SelInput value={reb.arrangement}
-                options={[
-                  { v: '2-face', label: '2면 대칭' },
-                  { v: '4-face', label: '4면 대칭' },
-                ]}
-                onChange={v => setReb(r => ({ ...r, arrangement: v as Arrangement }))}/>
-            </Row>
-          )}
-          <Row label="총 개수 (개)">
-            <NumInput value={reb.count} min={4} step={2}
-              onChange={v => setReb(r => ({ ...r, count: v }))}/>
-          </Row>
           <Row label="철근 직경">
             <SelInput value={reb.dia} options={rebarOptions}
               onChange={v => setReb(r => ({ ...r, dia: v as number }))}/>
           </Row>
+
+          {/* 직사각형/합성: 방향별 개수 입력 */}
+          {sec.shape !== 'circular' ? (
+            <div>
+              {/* 입력 그리드 — 방향 위치 시각화 */}
+              <div style={{
+                padding: '0.55rem 0.5rem 0.4rem',
+                background: 'var(--surface-2)',
+                borderBottom: '1px solid var(--border-light)',
+              }}>
+                {/* 안내 텍스트 */}
+                <div style={{
+                  fontSize: '0.6rem', color: 'var(--text-3)',
+                  fontFamily: 'var(--font-mono)', marginBottom: '0.45rem',
+                  lineHeight: 1.5,
+                }}>
+                  각 면 코너 <strong>제외</strong> 중간 철근 수 입력<br/>
+                  <span style={{ color: 'var(--primary)' }}>총 = 4(코너) + T + B + L + R = {nBar}개</span>
+                </div>
+
+                {/* 방향별 그리드: 십자 배치 */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 2fr 1fr',
+                  gridTemplateRows: 'auto auto auto',
+                  gap: '3px',
+                  alignItems: 'center',
+                }}>
+                  {/* 상단 (Top) */}
+                  <div/>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                    <span style={{ fontSize: '0.6rem', fontWeight: 700, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>Top</span>
+                    <input type="number" value={reb.nTop} min={0} step={1}
+                      onChange={e => setReb(r => ({ ...r, nTop: Math.max(0, Number(e.target.value)) }))}
+                      style={{ width: '100%', textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700 }}
+                    />
+                  </div>
+                  <div/>
+
+                  {/* 중간 행: Left — 단면 미니뷰 — Right */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                    <span style={{ fontSize: '0.6rem', fontWeight: 700, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>Left</span>
+                    <input type="number" value={reb.nLeft} min={0} step={1}
+                      onChange={e => setReb(r => ({ ...r, nLeft: Math.max(0, Number(e.target.value)) }))}
+                      style={{ width: '100%', textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700 }}
+                    />
+                  </div>
+
+                  {/* 단면 미니뷰 SVG */}
+                  <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    padding: '2px',
+                  }}>
+                    <svg viewBox="0 0 60 60" width="60" height="60" style={{ display: 'block' }}>
+                      {/* 단면 외곽 */}
+                      <rect x="4" y="4" width="52" height="52" fill="#f0f2f5" stroke="#6b7a99" strokeWidth="1.5"/>
+                      {/* 타이 점선 */}
+                      <rect x="10" y="10" width="40" height="40" fill="none" stroke="var(--primary)" strokeWidth="0.8" strokeDasharray="3 2"/>
+                      {/* 코너 4개 — 항상 표시 */}
+                      {[
+                        [12, 12], [48, 12], [12, 48], [48, 48]
+                      ].map(([cx, cy], i) => (
+                        <circle key={i} cx={cx} cy={cy} r="3.5" fill="#2a3150"/>
+                      ))}
+                      {/* Top 면 철근 */}
+                      {Array.from({ length: reb.nTop }, (_, i) => {
+                        const x = 12 + (i + 1) / (reb.nTop + 1) * 36
+                        return <circle key={i} cx={x} cy={12} r="3" fill="var(--primary)"/>
+                      })}
+                      {/* Bottom 면 철근 */}
+                      {Array.from({ length: reb.nBot }, (_, i) => {
+                        const x = 12 + (i + 1) / (reb.nBot + 1) * 36
+                        return <circle key={i} cx={x} cy={48} r="3" fill="var(--primary)"/>
+                      })}
+                      {/* Left 면 철근 */}
+                      {Array.from({ length: reb.nLeft }, (_, i) => {
+                        const y = 12 + (i + 1) / (reb.nLeft + 1) * 36
+                        return <circle key={i} cx={12} cy={y} r="3" fill="#e06020"/>
+                      })}
+                      {/* Right 면 철근 */}
+                      {Array.from({ length: reb.nRight }, (_, i) => {
+                        const y = 12 + (i + 1) / (reb.nRight + 1) * 36
+                        return <circle key={i} cx={48} cy={y} r="3" fill="#e06020"/>
+                      })}
+                    </svg>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                    <span style={{ fontSize: '0.6rem', fontWeight: 700, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>Right</span>
+                    <input type="number" value={reb.nRight} min={0} step={1}
+                      onChange={e => setReb(r => ({ ...r, nRight: Math.max(0, Number(e.target.value)) }))}
+                      style={{ width: '100%', textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700 }}
+                    />
+                  </div>
+
+                  {/* 하단 (Bottom) */}
+                  <div/>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                    <span style={{ fontSize: '0.6rem', fontWeight: 700, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>Bottom</span>
+                    <input type="number" value={reb.nBot} min={0} step={1}
+                      onChange={e => setReb(r => ({ ...r, nBot: Math.max(0, Number(e.target.value)) }))}
+                      style={{ width: '100%', textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700 }}
+                    />
+                  </div>
+                  <div/>
+                </div>
+
+                {/* 총 개수 표시 */}
+                <div style={{
+                  marginTop: '0.4rem',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '0.22rem 0.4rem',
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border-dark)',
+                  borderRadius: '2px',
+                }}>
+                  <span style={{ fontSize: '0.65rem', color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>
+                    총 주근 수
+                  </span>
+                  <span style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--primary)', fontFamily: 'var(--font-mono)' }}>
+                    {nBar}개
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* 원형: 총 개수 직접 입력 */
+            <Row label="총 개수 (개)">
+              <NumInput value={reb.nCircular} min={6} step={2}
+                onChange={v => setReb(r => ({ ...r, nCircular: v }))}/>
+            </Row>
+          )}
 
           {/* 횡보강근 */}
           <GroupHeader title="Transverse Reinf." sub="횡보강근"/>
@@ -1419,25 +1983,102 @@ export default function ColumnPanel() {
             </>
           )}
 
-          {/* 하중 */}
-          <GroupHeader title="Load Combination"/>
+          {/* 하중 조합 */}
+          <GroupHeader title="Load Combinations" sub="다중조합"/>
+
+          {/* 조합 탭 + 추가 버튼 */}
+          <div style={{
+            display: 'flex', flexWrap: 'wrap', gap: '2px',
+            padding: '0.3rem 0.4rem 0',
+            background: 'var(--surface-2)',
+            borderBottom: '1px solid var(--border-dark)',
+            alignItems: 'center',
+          }}>
+            {loads.map((l, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center' }}>
+                <button
+                  onClick={() => setActiveLoadIdx(i)}
+                  style={{
+                    border: 'none', padding: '0.18rem 0.45rem',
+                    fontSize: '0.62rem', fontWeight: 700,
+                    fontFamily: 'var(--font-mono)', cursor: 'pointer',
+                    borderRadius: '2px 0 0 2px',
+                    background: activeLoadIdx === i ? 'var(--primary)' : 'var(--surface-3)',
+                    color: activeLoadIdx === i ? '#fff' : 'var(--text-3)',
+                    borderRight: '1px solid var(--border-dark)',
+                  }}
+                >
+                  {l.name}
+                  {/* 해당 조합 결과 뱃지 */}
+                  {' '}
+                  <span style={{
+                    fontSize: '0.55rem',
+                    color: allResults[i]?.overallStatus === 'NG' ? '#ff6b6b'
+                      : allResults[i]?.overallStatus === 'WARN' ? '#f0a020'
+                      : '#4caf50',
+                    fontWeight: 900,
+                  }}>
+                    {allResults[i]?.overallStatus === 'NG' ? '✗' : allResults[i]?.overallStatus === 'WARN' ? '△' : '✓'}
+                  </span>
+                </button>
+                {loads.length > 1 && (
+                  <button
+                    onClick={() => removeLoad(i)}
+                    style={{
+                      border: 'none', padding: '0.18rem 0.3rem',
+                      fontSize: '0.6rem', fontWeight: 700,
+                      fontFamily: 'var(--font-mono)', cursor: 'pointer',
+                      borderRadius: '0 2px 2px 0',
+                      background: activeLoadIdx === i ? '#c0392b' : 'var(--surface-3)',
+                      color: activeLoadIdx === i ? '#fff' : 'var(--text-disabled)',
+                    }}
+                    title="조합 삭제"
+                  >×</button>
+                )}
+              </div>
+            ))}
+            <button
+              onClick={addLoad}
+              style={{
+                border: '1px dashed var(--border-dark)',
+                padding: '0.18rem 0.5rem',
+                fontSize: '0.62rem', fontWeight: 700,
+                fontFamily: 'var(--font-mono)', cursor: 'pointer',
+                borderRadius: '2px',
+                background: 'transparent',
+                color: 'var(--primary)',
+              }}
+              title="조합 추가"
+            >+ 추가</button>
+          </div>
+
+          {/* 선택된 조합 이름 편집 */}
+          <Row label="조합 이름">
+            <input
+              type="text"
+              value={load.name}
+              onChange={e => updateLoad(l => ({ ...l, name: e.target.value }))}
+              style={{ width: '100%', fontSize: '0.75rem', fontFamily: 'var(--font-mono)' }}
+            />
+          </Row>
+
           <Row label="Pu (kN)">
-            <NumInput value={load.Pu} min={0} step={50} onChange={v => setLoad(l => ({ ...l, Pu: v }))}/>
+            <NumInput value={load.Pu} min={0} step={50} onChange={v => updateLoad(l => ({ ...l, Pu: v }))}/>
           </Row>
-          <Row label="Mux (kN\u00b7m)">
-            <NumInput value={load.Mux} min={0} step={5} onChange={v => setLoad(l => ({ ...l, Mux: v }))}/>
+          <Row label="Mux (kN·m)">
+            <NumInput value={load.Mux} min={0} step={5} onChange={v => updateLoad(l => ({ ...l, Mux: v }))}/>
           </Row>
-          <Row label="Muy (kN\u00b7m)">
-            <NumInput value={load.Muy} min={0} step={5} onChange={v => setLoad(l => ({ ...l, Muy: v }))}/>
+          <Row label="Muy (kN·m)">
+            <NumInput value={load.Muy} min={0} step={5} onChange={v => updateLoad(l => ({ ...l, Muy: v }))}/>
           </Row>
           <Row label="Vu (kN)">
-            <NumInput value={load.Vu} min={0} step={5} onChange={v => setLoad(l => ({ ...l, Vu: v }))}/>
+            <NumInput value={load.Vu} min={0} step={5} onChange={v => updateLoad(l => ({ ...l, Vu: v }))}/>
           </Row>
           <Row label="lu (mm)">
-            <NumInput value={load.lu} min={0} step={100} onChange={v => setLoad(l => ({ ...l, lu: v }))}/>
+            <NumInput value={load.lu} min={0} step={100} onChange={v => updateLoad(l => ({ ...l, lu: v }))}/>
           </Row>
           <Row label="K (유효길이)">
-            <NumInput value={load.k} min={0.5} step={0.1} onChange={v => setLoad(l => ({ ...l, k: v }))}/>
+            <NumInput value={load.k} min={0.5} step={0.1} onChange={v => updateLoad(l => ({ ...l, k: v }))}/>
           </Row>
 
         </div>
@@ -1497,26 +2138,63 @@ export default function ColumnPanel() {
             letterSpacing: '0.08em', textTransform: 'uppercase',
             fontFamily: 'var(--font-mono)',
           }}>Section View</span>
-          <StatusBadge status={result.overallStatus}/>
+          <StatusBadge status={worstStatus}/>
         </div>
 
-        {/* 단면도 SVG */}
+        {/* ── 상단: 단면도 ── */}
         <div style={{
           flex: 1,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: '0.5rem 0.5rem 0.3rem',
           overflow: 'hidden',
           minHeight: 0,
           background: sectionValid ? undefined : 'var(--surface-2)',
+          borderBottom: '1px solid var(--border-dark)',
         }}>
           {sectionValid
-            ? <ColumnDiagram sec={sec} reb={reb} tie={tie} width={310} height={370}/>
-            : <span style={{ fontSize: '0.75rem', color: 'var(--text-disabled)', fontFamily: 'var(--font-mono)' }}>
-                {sec.shape === 'circular'
-                  ? 'D 값을 입력하면 단면도가 표시됩니다'
-                  : 'b, h 값을 입력하면 단면도가 표시됩니다'}
+            ? <ColumnDiagram sec={sec} reb={reb} tie={tie} width={340} height={260}/>
+            : <span style={{
+                display: 'flex', alignItems: 'center',
+                fontSize: '0.75rem', color: 'var(--text-disabled)', fontFamily: 'var(--font-mono)'
+              }}>
+                {sec.shape === 'circular' ? 'D 값을 입력하면 단면도가 표시됩니다' : 'b, h 값을 입력하면 단면도가 표시됩니다'}
               </span>
           }
+        </div>
+
+        {/* ── 하단: P-M 상관도 ── */}
+        <div style={{
+          flex: 1,
+          display: 'flex', flexDirection: 'column',
+          overflow: 'hidden',
+          minHeight: 0,
+        }}>
+          {/* P-M 헤더 */}
+          <div style={{
+            padding: '0.15rem 0.6rem',
+            background: 'var(--surface-3)',
+            borderBottom: '1px solid var(--border-light)',
+            fontSize: '0.6rem', fontWeight: 700,
+            color: 'var(--text-disabled)',
+            letterSpacing: '0.07em', textTransform: 'uppercase',
+            fontFamily: 'var(--font-mono)',
+            flexShrink: 0,
+          }}>{loads[activeResultIdx]?.name ?? ''} — P-M Interaction  (KDS 14 20 20)</div>
+          <div style={{
+            flex: 1,
+            display: 'flex', alignItems: 'stretch',
+            padding: '2px',
+            overflow: 'hidden',
+            minHeight: 0,
+          }}>
+            {sectionValid
+              ? <PMDiagram
+                  mat={mat} sec={sec} reb={reb} tie={tie}
+                  load={loads[activeResultIdx] ?? loads[0]}
+                  rho_g={rho_g}
+                />
+              : null
+            }
+          </div>
         </div>
 
         {/* Design Parameters 컴팩트 테이블 */}
@@ -1591,7 +2269,72 @@ export default function ColumnPanel() {
             letterSpacing: '0.08em', textTransform: 'uppercase',
             fontFamily: 'var(--font-mono)',
           }}>Check Results</span>
-          <StatusBadge status={result.overallStatus}/>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ fontSize: '0.62rem', color: 'var(--text-disabled)', fontFamily: 'var(--font-mono)' }}>
+              종합
+            </span>
+            <StatusBadge status={worstStatus}/>
+          </div>
+        </div>
+
+        {/* 조합 선택 탭 (결과 패널) */}
+        <div style={{
+          display: 'flex', flexWrap: 'wrap', gap: '2px',
+          padding: '0.25rem 0.4rem',
+          background: 'var(--surface-2)',
+          borderBottom: '1px solid var(--border-dark)',
+          flexShrink: 0,
+        }}>
+          {loads.map((l, i) => {
+            const st = allResults[i]?.overallStatus
+            return (
+              <button key={i}
+                onClick={() => setActiveResultIdx(i)}
+                style={{
+                  border: 'none', padding: '0.2rem 0.6rem',
+                  fontSize: '0.62rem', fontWeight: 700,
+                  fontFamily: 'var(--font-mono)', cursor: 'pointer',
+                  borderRadius: '2px',
+                  background: activeResultIdx === i ? 'var(--primary)' : 'var(--surface-3)',
+                  color: activeResultIdx === i ? '#fff' : 'var(--text-3)',
+                  borderBottom: activeResultIdx === i
+                    ? '2px solid var(--primary)'
+                    : `2px solid ${st === 'NG' ? '#ff6b6b' : st === 'WARN' ? '#f0a020' : '#4caf50'}`,
+                }}
+              >
+                {l.name}
+                {' '}
+                <span style={{
+                  fontSize: '0.58rem', fontWeight: 900,
+                  color: activeResultIdx === i ? 'rgba(255,255,255,0.85)'
+                    : st === 'NG' ? '#ff6b6b' : st === 'WARN' ? '#f0a020' : '#4caf50',
+                }}>
+                  {st === 'NG' ? 'N.G' : st === 'WARN' ? 'WARN' : 'O.K'}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+
+        {/* 선택된 조합 하중 요약 */}
+        <div style={{
+          padding: '0.2rem 0.65rem',
+          background: 'var(--surface)',
+          borderBottom: '1px solid var(--border-light)',
+          display: 'flex', gap: '1rem', flexWrap: 'wrap',
+          flexShrink: 0,
+        }}>
+          {[
+            ['Pu', `${loads[activeResultIdx]?.Pu ?? 0} kN`],
+            ['Mux', `${loads[activeResultIdx]?.Mux ?? 0} kN·m`],
+            ['Muy', `${loads[activeResultIdx]?.Muy ?? 0} kN·m`],
+            ['Vu', `${loads[activeResultIdx]?.Vu ?? 0} kN`],
+          ].map(([k, v]) => (
+            <span key={k} style={{ fontSize: '0.62rem', fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>
+              <span style={{ color: 'var(--text-disabled)' }}>{k} </span>
+              <span style={{ color: 'var(--text)', fontWeight: 700 }}>{v}</span>
+            </span>
+          ))}
         </div>
 
         {/* 결과 스크롤 영역 */}

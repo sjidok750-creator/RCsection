@@ -513,7 +513,7 @@ function StatusBadge({ status }: { status: 'OK' | 'NG' | 'WARN' }) {
 
 // ── 메인 패널 ───────────────────────────────────────────────
 export default function SimpleBeamPanel() {
-  const { isMobile, isCompact } = useResponsive()
+  const { isCompact } = useResponsive()
   const [mat, setMat]   = useState<MaterialInput>(DEFAULT_MAT)
   const [sec, setSec]   = useState<SectionInput>(DEFAULT_SEC)
   const [reb, setReb]   = useState<ReinforcementInput>(DEFAULT_REB)

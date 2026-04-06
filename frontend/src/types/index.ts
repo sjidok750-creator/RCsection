@@ -7,6 +7,7 @@ export type ModuleId =
   | 'deep-beam'
   | 'slab-one-way'
   | 'slab-two-way'
+  | 'slab-punching'
   | 'rc-column'
   | 'rc-wall'
 

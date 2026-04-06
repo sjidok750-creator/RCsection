@@ -53,7 +53,7 @@ function calcWall(
   load: WallLoad,
 ): CheckResult {
   const { fck, fy, Es } = mat
-  const { tw, lw, hw, cover } = sec
+  const { tw, lw, hw } = sec
   const lambda = 1.0
 
   // 유효깊이
@@ -532,7 +532,6 @@ function WallSectionDiagram({ sec, vbar, hbar, width = 310, height = 370 }: {
   // 수직 철근 (lw 방향 분포) — 원으로 표시
   const vRebarPositions: { x: number; y: number }[] = []
   const nv = Math.floor(sec.lw / vbar.spacing)
-  const vCover = sec.cover * scale / (sec.lw / drawLw * drawLw / drawLw) // 간략화
   const vCoverPx = Math.max(sec.cover / sec.lw * drawLw, 4)
   for (let i = 0; i <= nv; i++) {
     const x = ox + vCoverPx + (drawLw - 2 * vCoverPx) * (i / Math.max(nv, 1))
