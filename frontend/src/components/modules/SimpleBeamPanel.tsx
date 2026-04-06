@@ -578,7 +578,6 @@ export default function SimpleBeamPanel() {
   const beta1Diag = mat.fck <= 28 ? 0.85 : Math.max(0.85 - 0.007 * (mat.fck - 28), 0.65)
   const aDiag = As > 0 && sec.b > 0 ? (As * mat.fy) / (0.85 * mat.fck * sec.b) : 0
   const cDiag = beta1Diag > 0 ? aDiag / beta1Diag : 0
-  const eyDiag = mat.fy / mat.Es
   const etDiag = cDiag > 0 && secD.d > 0 ? 0.003 * (secD.d - cDiag) / cDiag : 0
 
   const rebarOptions = [10,13,16,19,22,25,29,32,35].map(d => ({
@@ -986,27 +985,9 @@ export default function SimpleBeamPanel() {
           <StatusBadge status={result.overallStatus}/>
         </div>
 
-        {/* ── 상단: 단면도 SVG ── */}
+        {/* ── 휨 단면 해석도 (Bending Section Analysis) ── */}
         <div style={{
-          flex: '0 0 58%',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: '0.4rem 0.4rem 0.2rem',
-          overflow: 'hidden',
-          minHeight: 0,
-          background: sec.b > 0 && sec.h > 0 ? undefined : 'var(--surface-2)',
-          borderBottom: '1px solid var(--border-light)',
-        }}>
-          {sec.b > 0 && sec.h > 0
-            ? <SimpleBeamDiagram section={secD} rebar={reb} fy={mat.fy} width={310} height={240}/>
-            : <span style={{ fontSize: '0.75rem', color: 'var(--text-disabled)', fontFamily: 'var(--font-mono)' }}>
-                b, h 값을 입력하면 단면도가 표시됩니다
-              </span>
-          }
-        </div>
-
-        {/* ── 하단: 변형률 + 힘 다이어그램 (삽도) ── */}
-        <div style={{
-          flex: '0 0 42%',
+          flex: 1,
           display: 'flex', alignItems: 'stretch',
           overflow: 'hidden',
           minHeight: 0,
@@ -1016,16 +997,15 @@ export default function SimpleBeamPanel() {
             ? <StrainForceDiagram
                 b={sec.b} h={sec.h} d={secD.d}
                 c={cDiag} a={aDiag} As={As}
-                fy={mat.fy} fck={mat.fck}
-                Et={etDiag} Ey={eyDiag}
-                width={560} height={230}
+                Et={etDiag}
+                width={620} height={520}
               />
             : <div style={{
-                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: '0.65rem', color: 'var(--text-disabled)', fontFamily: 'var(--font-mono)',
+                flex: 1, display: 'flex', flexDirection: 'column',
+                alignItems: 'center', justifyContent: 'center', gap: '0.5rem',
                 background: 'var(--surface-2)',
               }}>
-                Strain / Forces Diagram
+                <SimpleBeamDiagram section={secD} rebar={reb} fy={mat.fy} width={310} height={320}/>
               </div>
           }
         </div>
