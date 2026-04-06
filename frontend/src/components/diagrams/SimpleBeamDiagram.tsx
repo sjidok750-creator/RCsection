@@ -45,7 +45,10 @@ export default function SimpleBeamDiagram({
   const sw = width - padL - padR
   const sh = height - padT - padB
 
-  const aspectRatio = section.h / section.b
+  // aspect ratio를 clamp하여 극단적 비율에서도 영역을 꽉 채움
+  // 실제 h/b가 0.25(=1000×250)여도 최소 0.5로 제한 → 세로를 키움
+  const rawAR = section.h / section.b
+  const aspectRatio = Math.max(rawAR, 0.5)
   let drawW = sw
   let drawH = sw * aspectRatio
   if (drawH > sh) { drawH = sh; drawW = sh / aspectRatio }
@@ -422,10 +425,10 @@ export function StrainForceDiagram({
   const vAvailH = topH - padT2 - padB2
   const vAvailW = W - midX - padL2 - padR2
 
-  // 세로 단면: h방향=vAvailH, 폭은 이미지 개념으로 반폭 제한
+  // 세로 단면: 이미지 개념 — 비율 clamp (최대 b/h=1.5), 폭 제한
   const vSecH = vAvailH
-  const vSecW_raw = Math.min(Math.round(vSecH * b / h), vAvailW)
-  const vSecW = Math.min(vSecW_raw, Math.round(vAvailW * 0.45))  // 폭 반으로 제한
+  const clampedBH = Math.min(b / h, 1.5)  // b>>h여도 최대 1.5:1
+  const vSecW = Math.min(Math.round(vSecH * clampedBH), Math.round(vAvailW * 0.5))
   const vSecX = midX + padL2 + Math.round((vAvailW - vSecW) / 2)
   const vSecY = topY + padT2
 
