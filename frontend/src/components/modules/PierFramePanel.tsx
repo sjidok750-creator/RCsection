@@ -43,6 +43,7 @@ interface PierGeom {
   colSpacing: number    // m
   colHeight: number     // m
   copingDepth: number   // m
+  copingWidthB: number  // m  코핑 교축직각방향 폭 (단면 B)
   colWidth: number      // m
   colDepth: number      // m
   fck: number           // MPa
@@ -56,7 +57,7 @@ interface BearingLoad { id: number; Fy: number; Fx: number; Mz: number }
 // ────────────────────────────────────────────────────────────────
 const DEFAULT_GEOM: PierGeom = {
   colCount: 2, colSpacing: 6.0, colHeight: 8.0,
-  copingDepth: 1.5, colWidth: 1.2, colDepth: 1.5,
+  copingDepth: 1.5, copingWidthB: 2.5, colWidth: 1.2, colDepth: 1.5,
   fck: 30, bearingCount: 2,
 }
 const DEFAULT_BEARING_LOADS: BearingLoad[] = [
@@ -70,18 +71,19 @@ function Ec(fck: number) { return 8500 * Math.pow(fck + 4, 1 / 3) }
 //  골조 모델 생성  (받침 절점을 코핑 위 독립 절점으로 생성)
 // ────────────────────────────────────────────────────────────────
 function buildModel(geom: PierGeom, bearingLoads: BearingLoad[]) {
-  const { colCount, colSpacing, colHeight, copingDepth, colWidth, colDepth, fck } = geom
+  const { colCount, colSpacing, colHeight, copingDepth, copingWidthB, colWidth, colDepth, fck } = geom
   const E = Ec(fck)
 
   const totalColSpan = colCount > 1 ? (colCount - 1) * colSpacing : 0
-  const copingW      = totalColSpan + colWidth * 2
+  const copingW      = totalColSpan + colWidth * 2   // 코핑 교축방향 전체 길이
   const copingY      = colHeight           // 코핑 하단 = 기둥 상단
   const copingTopY   = colHeight + copingDepth
 
   const Ac   = colWidth * colDepth * 1e6
   const Ic   = colWidth * Math.pow(colDepth, 3) / 12 * 1e12
-  const Acop = copingW  * copingDepth      * 1e6
-  const Icop = copingW  * Math.pow(copingDepth, 3) / 12 * 1e12
+  // 코핑 단면: B(교축직각방향 폭) × h(깊이)
+  const Acop = copingWidthB * copingDepth      * 1e6
+  const Icop = copingWidthB * Math.pow(copingDepth, 3) / 12 * 1e12
 
   // 기둥 x 좌표
   const colXs: number[] = []
@@ -1014,6 +1016,9 @@ export default function PierFramePanel() {
           <Row label="코핑 깊이(m)">
             <Num value={geom.copingDepth} min={0.5} step={0.1} onChange={v=>updG({copingDepth:v})}/>
           </Row>
+          <Row label="코핑 폭B(m)">
+            <Num value={geom.copingWidthB} min={0.5} step={0.1} onChange={v=>updG({copingWidthB:v})}/>
+          </Row>
 
           <GH title="Material" sub="KDS 24 14 21"/>
           <Row label="fck (MPa)">
@@ -1030,9 +1035,11 @@ export default function PierFramePanel() {
           <div style={{ padding:'0.22rem 0.55rem', background:'#edf2fa',
             borderTop:'1px solid #d0daea', fontSize:'0.62rem',
             fontFamily:'var(--font-mono)', color:'#4a6a9a', lineHeight:1.8 }}>
-            <div>A<sub>g</sub> = {(geom.colWidth*geom.colDepth*1e4).toFixed(0)} cm²</div>
-            <div>I<sub>g</sub> = {(geom.colWidth*Math.pow(geom.colDepth,3)/12*1e8).toFixed(0)} cm⁴</div>
-            <div>코핑 폭 = {copingW.toFixed(2)} m</div>
+            <div>기둥 A<sub>g</sub> = {(geom.colWidth*geom.colDepth*1e4).toFixed(0)} cm²</div>
+            <div>기둥 I<sub>g</sub> = {(geom.colWidth*Math.pow(geom.colDepth,3)/12*1e8).toFixed(0)} cm⁴</div>
+            <div>코핑 A = {(geom.copingWidthB*geom.copingDepth*1e4).toFixed(0)} cm²</div>
+            <div>코핑 I = {(geom.copingWidthB*Math.pow(geom.copingDepth,3)/12*1e8).toFixed(0)} cm⁴</div>
+            <div>코핑 길이 = {copingW.toFixed(2)} m</div>
           </div>
 
           <GH title="Bearing Loads" sub="받침 하중"/>
