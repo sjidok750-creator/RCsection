@@ -2,12 +2,11 @@ import { useState } from 'react'
 import type { ModuleId, ModuleInfo } from '../../types'
 
 export const MODULES: ModuleInfo[] = [
-  { id: 'simple-beam',    label: 'RC 보 단면',   labelEn: 'RC Beam Section', group: '보 (Beam)',         standard: 'KDS 14 20 20/22', icon: '▬' },
-  { id: 'deep-beam',      label: '깊은보',       labelEn: 'Deep Beam',      group: '보 (Beam)',         standard: 'KDS 14 20 24',    icon: '▰' },
-  { id: 'slab-one-way',   label: '1방향 슬래브', labelEn: 'One-way Slab',   group: '슬래브 (Slab)',    standard: 'KDS 14 20 20/22', icon: '▭' },
-  { id: 'slab-two-way',   label: '2방향 슬래브', labelEn: 'Two-way Slab',   group: '슬래브 (Slab)',    standard: 'KDS 14 20 20',    icon: '⊞' },
-  { id: 'rc-column',      label: 'RC 기둥',      labelEn: 'RC Column',      group: '기둥 검토 (Column)', standard: 'KDS 14 20 20/22', icon: '▮' },
-  { id: 'rc-wall',        label: '벽체 검토',    labelEn: 'RC Wall',        group: '기둥 검토 (Column)', standard: 'KDS 14 20 70',    icon: '▯' },
+  { id: 'pier-frame',  label: '교각 골조해석',  labelEn: 'Pier Frame Analysis', group: '구조해석 (Analysis)',  standard: 'KDS 24 14 21', icon: '⌥' },
+  { id: 'simple-beam', label: 'RC 보 단면',     labelEn: 'RC Beam Section',     group: '단면검토 (Section)',   standard: 'KDS 24 14 21', icon: '▬' },
+  { id: 'deep-beam',   label: '깊은보',         labelEn: 'Deep Beam',           group: '단면검토 (Section)',   standard: 'KDS 24 14 21', icon: '▰' },
+  { id: 'rc-column',   label: 'RC 기둥',        labelEn: 'RC Column',           group: '단면검토 (Section)',   standard: 'KDS 24 14 21', icon: '▮' },
+  { id: 'rc-wall',     label: '벽체',           labelEn: 'RC Wall',             group: '단면검토 (Section)',   standard: 'KDS 24 14 21', icon: '▯' },
 ]
 
 interface SidebarProps {
@@ -148,9 +147,9 @@ export default function Sidebar({ active, onSelect }: SidebarProps) {
         background: 'var(--surface-2)',
       }}>
         <div style={{ fontSize: '0.62rem', color: 'var(--text-disabled)', fontFamily: 'var(--font-mono)', lineHeight: 1.8 }}>
-          KDS 14 20 00 : 2025<br />
-          콘크리트구조 설계기준<br />
-          국토교통부 고시 제2025-879호
+          KDS 24 14 21 : 2021<br />
+          도로교설계기준 (한계상태설계법)<br />
+          국토교통부 고시
         </div>
       </div>
     </nav>

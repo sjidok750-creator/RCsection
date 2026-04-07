@@ -1,15 +1,13 @@
-import type { DesignCode, ModuleId } from '../../types'
+import type { ModuleId } from '../../types'
 import { MODULES } from './Sidebar'
 
 interface HeaderProps {
   activeModule: ModuleId
-  designCode: DesignCode
-  onToggleCode: () => void
   onMenuOpen?: () => void
   showMenuBtn?: boolean
 }
 
-export default function Header({ activeModule, designCode, onToggleCode, onMenuOpen, showMenuBtn }: HeaderProps) {
+export default function Header({ activeModule, onMenuOpen, showMenuBtn }: HeaderProps) {
   const mod = MODULES.find(m => m.id === activeModule)
 
   const btnBase: React.CSSProperties = {
@@ -62,7 +60,7 @@ export default function Header({ activeModule, designCode, onToggleCode, onMenuO
         <span style={{
           fontSize: '0.68rem', color: 'rgba(255,255,255,0.65)',
           fontFamily: 'var(--font-mono)',
-        }}>KDS 14 20 00 : 2025</span>
+        }}>KDS 24 14 21 : 2021</span>
       </div>
 
       {/* ── 메뉴 툴바 ── */}
@@ -101,16 +99,14 @@ export default function Header({ activeModule, designCode, onToggleCode, onMenuO
 
         <div style={{ flex: 1 }}/>
 
-        {/* 설계기준 토글 */}
-        <span style={{ fontSize: '0.7rem', color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>설계기준</span>
-        <button onClick={onToggleCode} style={{
-          ...btnBase,
-          background: designCode === 'KDS' ? 'var(--primary)' : 'var(--surface-2)',
-          border: `1px solid ${designCode === 'KDS' ? 'var(--primary)' : 'var(--border-dark)'}`,
-          color: designCode === 'KDS' ? '#fff' : 'var(--text-2)',
-          letterSpacing: '0.05em',
-          minWidth: '3.5rem', justifyContent: 'center',
-        }}>{designCode}</button>
+        {/* 설계기준 고정 표시 */}
+        <span style={{
+          fontSize: '0.68rem', color: 'var(--primary)',
+          fontFamily: 'var(--font-mono)', fontWeight: 700,
+          background: 'var(--primary-bg)',
+          border: '1px solid var(--primary-dim)',
+          borderRadius: '2px', padding: '0.1rem 0.55rem',
+        }}>KDS</span>
       </div>
 
     </div>

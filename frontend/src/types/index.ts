@@ -1,15 +1,13 @@
 // ─── 설계기준 ─────────────────────────────────────────────
-export type DesignCode = 'KDS' | 'ACI'
+export type DesignCode = 'KDS'
 
 // ─── 검토 모듈 종류 ────────────────────────────────────────
 export type ModuleId =
   | 'simple-beam'
   | 'deep-beam'
-  | 'slab-one-way'
-  | 'slab-two-way'
-  | 'slab-punching'
   | 'rc-column'
   | 'rc-wall'
+  | 'pier-frame'
 
 export interface ModuleInfo {
   id: ModuleId
