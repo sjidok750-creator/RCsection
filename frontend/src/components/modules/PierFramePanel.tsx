@@ -70,7 +70,9 @@ const DEFAULT_BEARING_LOADS: BearingLoad[] = [
 function Ec(fck: number) { return 8500 * Math.pow(fck + 4, 1 / 3) }
 
 // ────────────────────────────────────────────────────────────────
-//  골조 모델 생성  (받침 절점을 코핑 위 독립 절점으로 생성)
+//  골조 모델 생성
+//  코핑 중심선 = 기둥 상단 + copingDepth/2  에 모든 코핑 절점 배치
+//  받침 절점도 코핑 중심선 y 에 놓고, 시각적으로만 코핑 상단에 표시
 // ────────────────────────────────────────────────────────────────
 function buildModel(geom: PierGeom, bearingLoads: BearingLoad[]) {
   const { colCount, colSpacing, colHeight, copingDepth, copingWidthB, colWidth, colDepth, fck } = geom
@@ -78,8 +80,8 @@ function buildModel(geom: PierGeom, bearingLoads: BearingLoad[]) {
 
   const totalColSpan = colCount > 1 ? (colCount - 1) * colSpacing : 0
   const copingW      = totalColSpan + colWidth * 2   // 코핑 교축방향 전체 길이
-  const copingY      = colHeight           // 코핑 하단 = 기둥 상단
-  const copingTopY   = colHeight + copingDepth
+  const copingCL     = colHeight + copingDepth / 2   // 코핑 중심선 y
+  const copingTopY   = colHeight + copingDepth       // 코핑 상단 y (시각용)
 
   const Ac   = colWidth * colDepth * 1e6
   const Ic   = colWidth * Math.pow(colDepth, 3) / 12 * 1e12
@@ -110,39 +112,67 @@ function buildModel(geom: PierGeom, bearingLoads: BearingLoad[]) {
     baseIds.push(nid++)
   }
 
-  // 기둥 상단 = 코핑 하단 절점
+  // 기둥 상단 = 코핑 중심선 절점
   const topIds: number[] = []
   for (const x of colXs) {
-    nodes.push({ id: nid, x, y: copingY, bc: [false, false, false] })
+    nodes.push({ id: nid, x, y: copingCL, bc: [false, false, false] })
     topIds.push(nid++)
   }
 
-  // 받침 절점 (코핑 상단)
+  // 코핑 양단 절점 (기둥 바깥 캔틸레버 단부)
+  const copingEndIds: number[] = []
+  const leftEnd = -copingW / 2
+  const rightEnd = copingW / 2
+  // 좌측 끝이 기둥 바깥인 경우에만 추가
+  if (colXs.length > 0 && Math.abs(leftEnd - colXs[0]) > 0.01) {
+    nodes.push({ id: nid, x: leftEnd, y: copingCL, bc: [false, false, false] })
+    copingEndIds.push(nid++)
+  }
+  if (colXs.length > 0 && Math.abs(rightEnd - colXs[colXs.length - 1]) > 0.01) {
+    nodes.push({ id: nid, x: rightEnd, y: copingCL, bc: [false, false, false] })
+    copingEndIds.push(nid++)
+  }
+
+  // 받침 절점 (코핑 중심선 y, 시각적으로만 상단 표시)
   const bearingNodeIds: number[] = []
   for (let bi = 0; bi < bc; bi++) {
-    nodes.push({
-      id: nid, x: bearingXs[bi], y: copingTopY,
-      bc: [false, false, false],
-      isBearing: true, bearingIdx: bi,
+    // 기둥 위치와 겹치는지 확인
+    const bx = bearingXs[bi]
+    const colMatch = topIds.find(tid => {
+      const tn = nodes.find(n => n.id === tid)
+      return tn && Math.abs(tn.x - bx) < 0.01
     })
-    bearingNodeIds.push(nid++)
+    if (colMatch) {
+      // 기둥 상단 절점을 받침 절점으로 재사용
+      const nd = nodes.find(n => n.id === colMatch)!
+      nd.isBearing = true
+      nd.bearingIdx = bi
+      bearingNodeIds.push(colMatch)
+    } else {
+      nodes.push({
+        id: nid, x: bx, y: copingCL,
+        bc: [false, false, false],
+        isBearing: true, bearingIdx: bi,
+      })
+      bearingNodeIds.push(nid++)
+    }
   }
 
   // ── 부재 ──
   const members: Member[] = []
   let mid = 1
 
-  // 기둥
+  // 기둥 (기초 → 코핑 중심선)
   for (let i = 0; i < colCount; i++)
     members.push({ id: mid++, ni: baseIds[i], nj: topIds[i], E, A: Ac, I: Ic, type: 'column' })
 
-  // 코핑 절점 집합 = 기둥 상단 + 받침 절점, x 순서로 정렬
-  const copingNodeSet = [
-    ...topIds.map(id => ({ id, x: nodes.find(n => n.id === id)!.x })),
-    ...bearingNodeIds.map(id => ({ id, x: nodes.find(n => n.id === id)!.x })),
-  ].sort((a, b) => a.x - b.x)
+  // 코핑 절점 집합 = 기둥 상단 + 코핑 양단 + 받침(기둥과 안겹치는 것만), x 순서로 정렬
+  const allCopingNodeIds = new Set([...topIds, ...copingEndIds, ...bearingNodeIds])
+  const copingNodeSet = [...allCopingNodeIds]
+    .map(id => ({ id, x: nodes.find(n => n.id === id)!.x }))
+    .sort((a, b) => a.x - b.x)
 
-  // 코핑 부재: 정렬된 절점 순서로 연결
+  // 코핑 부재: 정렬된 절점 순서로 연결 (모두 같은 y)
   for (let i = 0; i < copingNodeSet.length - 1; i++)
     members.push({
       id: mid++,
@@ -416,13 +446,14 @@ function ModelSVG({ nodes, members, result, geom, copingW,
     }
   }
 
-  // 다이어그램 스케일 — 모델 좌표 단위 (yRange의 12% 기준)
+  // 다이어그램 스케일 — 최대값을 부재 길이의 25%로 제한
   const allDiagVals = mfArr.flatMap(mf => {
     const [vi, vj] = getDiagValues(mf)
     return [Math.abs(vi), Math.abs(vj)]
   })
   const maxAbsDiag = Math.max(...allDiagVals, 1)
-  const diagScale = (yRange * 0.12) / maxAbsDiag
+  // 최대 다이어그램 오프셋을 모델 높이의 8%로 제한
+  const diagScale = (yRange * 0.08) / maxAbsDiag
 
   // 다이어그램 경로 (법선벡터 방향으로 오프셋)
   function diagPath(m: Member): string {
@@ -654,12 +685,12 @@ function ModelSVG({ nodes, members, result, geom, copingW,
         )
       })}
 
-      {/* 하중 화살표 */}
+      {/* 하중 화살표 (코핑 상단 위치에서 표시) */}
       {bearingLoads.slice(0, geom.bearingCount).map((bl, bi) => {
         const bnid = bearingNodeIds[bi]
         const bn   = nodeMap.get(bnid)
         if (!bn) return null
-        const bx = sx(bn.x), by = sy(bn.y)
+        const bx = sx(bn.x), by = sy(copingTopY)
         const maxFy  = Math.max(...bearingLoads.map(b => b.Fy), 1)
         const arrLen = 30 + Math.abs(bl.Fy) / maxFy * 40
         const hLen   = Math.min(Math.abs(bl.Fx) / 200 * 28 + 10, 45)
@@ -718,13 +749,15 @@ function ModelSVG({ nodes, members, result, geom, copingW,
         }
 
         if (isBearing) {
+          // 받침 절점은 시각적으로 코핑 상단에 표시
+          const byVis = sy(copingTopY)
           return (
             <g key={`nd-${n.id}`}>
-              <circle cx={px} cy={py} r="7"
+              <circle cx={px} cy={byVis} r="7"
                 fill="#fff" stroke={C.bearing} strokeWidth="2"/>
-              <circle cx={px} cy={py} r="3.5"
+              <circle cx={px} cy={byVis} r="3.5"
                 fill={C.bearing}/>
-              <text x={px} y={py-12} textAnchor="middle"
+              <text x={px} y={byVis-12} textAnchor="middle"
                 fill={C.bearing} fontSize="8" fontFamily="JetBrains Mono,monospace" fontWeight="700">
                 BRG{(n.bearingIdx ?? 0)+1}
               </text>
