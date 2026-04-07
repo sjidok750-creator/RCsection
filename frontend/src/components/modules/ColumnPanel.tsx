@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import type { MaterialInput, CheckResult, CheckItem, CalcLine } from '../../types'
 import { useResponsive } from '../../hooks/useResponsive'
 import ResultTable from '../common/ResultTable'
@@ -1173,6 +1173,260 @@ function SelInput({ value, options, onChange }: {
   )
 }
 
+// ── 툴팁: lu 비지지길이 ──────────────────────────────────────
+function LuTooltip() {
+  return (
+    <div style={{ width: 300 }}>
+      <div style={{
+        fontSize: '0.72rem', fontWeight: 800,
+        color: 'var(--primary)',
+        fontFamily: "'Pretendard','Apple SD Gothic Neo',sans-serif",
+        marginBottom: '0.35rem',
+        letterSpacing: '0.01em',
+      }}>비지지길이 l<sub>u</sub></div>
+      <div style={{
+        fontSize: '0.67rem', color: '#e8effe',
+        fontFamily: "'Pretendard','Apple SD Gothic Neo',sans-serif",
+        lineHeight: 1.6, marginBottom: '0.5rem',
+      }}>
+        기둥의 <b>횡방향 지지점(보, 슬래브) 사이의 순간격</b>.<br/>
+        층고에서 상·하 보 깊이를 뺀 값을 사용한다.<br/>
+        <span style={{ color: '#c7d9fb', fontSize: '0.63rem' }}>
+          KDS 14 20 20 : 9.6절
+        </span>
+      </div>
+      {/* SVG 다이어그램 */}
+      <svg viewBox="0 0 280 200" width="100%" style={{ display: 'block', background: '#1a2540', borderRadius: 4 }}>
+        {/* 상단 슬래브 */}
+        <rect x="20" y="10" width="240" height="22" fill="#3a5080" rx="2"/>
+        <text x="140" y="25" textAnchor="middle" fill="#c7d9fb" fontSize="10" fontFamily="JetBrains Mono,monospace">슬래브 / 보 (상단 지지점)</text>
+        {/* 기둥 */}
+        <rect x="105" y="32" width="70" height="136" fill="#2a3f6a" stroke="#4a6fa0" strokeWidth="1.5"/>
+        {/* 철근 표시 */}
+        <line x1="115" y1="38" x2="115" y2="162" stroke="#e8c060" strokeWidth="2"/>
+        <line x1="165" y1="38" x2="165" y2="162" stroke="#e8c060" strokeWidth="2"/>
+        <line x1="120" y1="38" x2="120" y2="162" stroke="#e8c060" strokeWidth="1.5"/>
+        <line x1="160" y1="38" x2="160" y2="162" stroke="#e8c060" strokeWidth="1.5"/>
+        {/* 하단 슬래브 */}
+        <rect x="20" y="168" width="240" height="22" fill="#3a5080" rx="2"/>
+        <text x="140" y="183" textAnchor="middle" fill="#c7d9fb" fontSize="10" fontFamily="JetBrains Mono,monospace">슬래브 / 보 (하단 지지점)</text>
+        {/* lu 치수선 */}
+        <line x1="88" y1="32" x2="88" y2="168" stroke="#ff9f43" strokeWidth="1.5" strokeDasharray="4,2"/>
+        <line x1="84" y1="32" x2="92" y2="32" stroke="#ff9f43" strokeWidth="1.5"/>
+        <line x1="84" y1="168" x2="92" y2="168" stroke="#ff9f43" strokeWidth="1.5"/>
+        <text x="78" y="104" textAnchor="middle" fill="#ff9f43" fontSize="12" fontFamily="JetBrains Mono,monospace" fontWeight="700">l</text>
+        <text x="84" y="108" textAnchor="middle" fill="#ff9f43" fontSize="9" fontFamily="JetBrains Mono,monospace">u</text>
+      </svg>
+    </div>
+  )
+}
+
+// ── 툴팁: K 유효길이계수 ──────────────────────────────────────
+function KTooltip() {
+  return (
+    <div style={{ width: 340 }}>
+      <div style={{
+        fontSize: '0.72rem', fontWeight: 800,
+        color: 'var(--primary)',
+        fontFamily: "'Pretendard','Apple SD Gothic Neo',sans-serif",
+        marginBottom: '0.35rem',
+      }}>유효길이계수 K</div>
+      <div style={{
+        fontSize: '0.67rem', color: '#e8effe',
+        fontFamily: "'Pretendard','Apple SD Gothic Neo',sans-serif",
+        lineHeight: 1.6, marginBottom: '0.5rem',
+      }}>
+        기둥의 <b>단부 구속조건</b>에 따라 결정되는 계수.<br/>
+        유효좌굴길이 = K · l<sub>u</sub><br/>
+        <span style={{ color: '#c7d9fb', fontSize: '0.63rem' }}>
+          KDS 14 20 20 : 9.6절  (비횡이동 골조 기준)
+        </span>
+      </div>
+      {/* SVG: K값별 좌굴형상 5가지 */}
+      <svg viewBox="0 0 320 170" width="100%" style={{ display: 'block', background: '#1a2540', borderRadius: 4 }}>
+        {/* 공통 설정 */}
+        {/* Case 1: 양단 핀 K=1.0 */}
+        <g transform="translate(10,10)">
+          <rect x="18" y="0" width="28" height="8" fill="#3a5080" rx="1"/>
+          <rect x="18" y="142" width="28" height="8" fill="#3a5080" rx="1"/>
+          {/* 핀 기호 상단 */}
+          <polygon points="32,8 26,18 38,18" fill="none" stroke="#7a9fcc" strokeWidth="1.2"/>
+          {/* 핀 기호 하단 */}
+          <polygon points="32,142 26,132 38,132" fill="none" stroke="#7a9fcc" strokeWidth="1.2"/>
+          {/* 좌굴형상 (사인곡선) */}
+          <path d="M32,18 Q52,80 32,132" fill="none" stroke="#ff9f43" strokeWidth="2" strokeDasharray="3,2"/>
+          <line x1="32" y1="18" x2="32" y2="132" stroke="#4a6fa0" strokeWidth="1.5"/>
+          <text x="32" y="160" textAnchor="middle" fill="#ff9f43" fontSize="10" fontFamily="JetBrains Mono,monospace" fontWeight="700">K=1.0</text>
+          <text x="32" y="172" textAnchor="middle" fill="#8899bb" fontSize="8" fontFamily="JetBrains Mono,monospace">양단핀</text>
+        </g>
+        {/* Case 2: 양단 고정 K=0.5 */}
+        <g transform="translate(70,10)">
+          <rect x="18" y="0" width="28" height="8" fill="#3a5080" rx="1"/>
+          <rect x="18" y="142" width="28" height="8" fill="#3a5080" rx="1"/>
+          {/* 고정 기호 (빗금) */}
+          {[0,5,10,15,20].map(i => (
+            <line key={i} x1={18+i} y1="0" x2={13+i} y2="-6" stroke="#7a9fcc" strokeWidth="1"/>
+          ))}
+          {[0,5,10,15,20].map(i => (
+            <line key={i} x1={18+i} y1="150" x2={13+i} y2="156" stroke="#7a9fcc" strokeWidth="1"/>
+          ))}
+          {/* S자 좌굴형상 */}
+          <path d="M32,8 Q52,45 32,75 Q12,105 32,142" fill="none" stroke="#ff9f43" strokeWidth="2" strokeDasharray="3,2"/>
+          <line x1="32" y1="8" x2="32" y2="142" stroke="#4a6fa0" strokeWidth="1.5"/>
+          {/* K=0.5 표시선 */}
+          <line x1="10" y1="38" x2="28" y2="38" stroke="#54d98c" strokeWidth="1" strokeDasharray="2,2"/>
+          <line x1="10" y1="112" x2="28" y2="112" stroke="#54d98c" strokeWidth="1" strokeDasharray="2,2"/>
+          <text x="32" y="160" textAnchor="middle" fill="#ff9f43" fontSize="10" fontFamily="JetBrains Mono,monospace" fontWeight="700">K=0.5</text>
+          <text x="32" y="172" textAnchor="middle" fill="#8899bb" fontSize="8" fontFamily="JetBrains Mono,monospace">양단고정</text>
+        </g>
+        {/* Case 3: 하단고정 상단핀 K=0.7 */}
+        <g transform="translate(130,10)">
+          <rect x="18" y="142" width="28" height="8" fill="#3a5080" rx="1"/>
+          {[0,5,10,15,20].map(i => (
+            <line key={i} x1={18+i} y1="150" x2={13+i} y2="156" stroke="#7a9fcc" strokeWidth="1"/>
+          ))}
+          <polygon points="32,8 26,18 38,18" fill="none" stroke="#7a9fcc" strokeWidth="1.2"/>
+          <path d="M32,18 Q50,90 32,142" fill="none" stroke="#ff9f43" strokeWidth="2" strokeDasharray="3,2"/>
+          <line x1="32" y1="18" x2="32" y2="142" stroke="#4a6fa0" strokeWidth="1.5"/>
+          <text x="32" y="160" textAnchor="middle" fill="#ff9f43" fontSize="10" fontFamily="JetBrains Mono,monospace" fontWeight="700">K=0.7</text>
+          <text x="32" y="172" textAnchor="middle" fill="#8899bb" fontSize="8" fontFamily="JetBrains Mono,monospace">하단고정</text>
+          <text x="32" y="180" textAnchor="middle" fill="#8899bb" fontSize="8" fontFamily="JetBrains Mono,monospace">상단핀</text>
+        </g>
+        {/* Case 4: 하단고정 상단자유 K=2.0 */}
+        <g transform="translate(195,10)">
+          <rect x="18" y="142" width="28" height="8" fill="#3a5080" rx="1"/>
+          {[0,5,10,15,20].map(i => (
+            <line key={i} x1={18+i} y1="150" x2={13+i} y2="156" stroke="#7a9fcc" strokeWidth="1"/>
+          ))}
+          {/* 자유단 표시 */}
+          <line x1="22" y1="8" x2="42" y2="8" stroke="#7a9fcc" strokeWidth="1.5"/>
+          <path d="M32,8 Q52,75 32,142" fill="none" stroke="#ff9f43" strokeWidth="2" strokeDasharray="3,2"/>
+          <line x1="32" y1="8" x2="32" y2="142" stroke="#4a6fa0" strokeWidth="1.5"/>
+          <text x="32" y="160" textAnchor="middle" fill="#ff9f43" fontSize="10" fontFamily="JetBrains Mono,monospace" fontWeight="700">K=2.0</text>
+          <text x="32" y="172" textAnchor="middle" fill="#8899bb" fontSize="8" fontFamily="JetBrains Mono,monospace">하단고정</text>
+          <text x="32" y="180" textAnchor="middle" fill="#8899bb" fontSize="8" fontFamily="JetBrains Mono,monospace">상단자유</text>
+        </g>
+        {/* Case 5: 양단고정 횡이동 K=1.2 */}
+        <g transform="translate(258,10)">
+          <rect x="18" y="0" width="28" height="8" fill="#3a5080" rx="1"/>
+          <rect x="18" y="142" width="28" height="8" fill="#3a5080" rx="1"/>
+          {[0,5,10,15,20].map(i => (
+            <line key={i} x1={18+i} y1="0" x2={13+i} y2="-6" stroke="#7a9fcc" strokeWidth="1"/>
+          ))}
+          {[0,5,10,15,20].map(i => (
+            <line key={i} x1={18+i} y1="150" x2={13+i} y2="156" stroke="#7a9fcc" strokeWidth="1"/>
+          ))}
+          {/* 횡이동 곡선 */}
+          <path d="M32,8 Q52,75 42,142" fill="none" stroke="#ff9f43" strokeWidth="2" strokeDasharray="3,2"/>
+          <line x1="32" y1="8" x2="42" y2="142" stroke="#4a6fa0" strokeWidth="1.5"/>
+          <text x="37" y="160" textAnchor="middle" fill="#ff9f43" fontSize="10" fontFamily="JetBrains Mono,monospace" fontWeight="700">K=1.2</text>
+          <text x="37" y="172" textAnchor="middle" fill="#8899bb" fontSize="8" fontFamily="JetBrains Mono,monospace">횡이동</text>
+          <text x="37" y="180" textAnchor="middle" fill="#8899bb" fontSize="8" fontFamily="JetBrains Mono,monospace">골조</text>
+        </g>
+      </svg>
+      {/* 권고값 표 */}
+      <div style={{
+        marginTop: '0.4rem',
+        fontSize: '0.63rem',
+        fontFamily: 'JetBrains Mono, monospace',
+        color: '#c7d9fb',
+        lineHeight: 1.7,
+      }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 1rem' }}>
+          <span>비횡이동 골조</span><span style={{ color: '#ff9f43' }}>K ≤ 1.0 (권고: 0.65~1.0)</span>
+          <span>횡이동 골조</span><span style={{ color: '#ff9f43' }}>K ≥ 1.0 (권고: 1.2~2.0)</span>
+          <span>보수적 기본값</span><span style={{ color: '#54d98c' }}>K = 1.0</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── RowWithTooltip: 라벨에 ? 아이콘 + hover 툴팁 ────────────
+function RowWithTooltip({ label, tooltip, children }: {
+  label: string
+  tooltip: React.ReactNode
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  const show = () => {
+    if (timerRef.current) clearTimeout(timerRef.current)
+    setOpen(true)
+  }
+  const hide = () => {
+    timerRef.current = setTimeout(() => setOpen(false), 120)
+  }
+
+  // 툴팁 위치: 패널 우측으로 나올 수 있게 fixed positioning
+  const [pos, setPos] = useState({ top: 0, left: 0 })
+  const triggerRef = useRef<HTMLButtonElement>(null)
+
+  const handleMouseEnter = () => {
+    if (triggerRef.current) {
+      const r = triggerRef.current.getBoundingClientRect()
+      setPos({ top: r.top, left: r.right + 8 })
+    }
+    show()
+  }
+
+  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current) }, [])
+
+  return (
+    <div ref={wrapRef} style={S.row}>
+      <div style={{ ...S.label, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+        <span>{label}</span>
+        <button
+          ref={triggerRef}
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={hide}
+          onFocus={handleMouseEnter}
+          onBlur={hide}
+          style={{
+            border: '1px solid var(--border-dark)',
+            borderRadius: '50%',
+            width: '0.95rem', height: '0.95rem',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '0.55rem', fontWeight: 800,
+            cursor: 'help',
+            background: 'var(--primary-bg)',
+            color: 'var(--primary)',
+            padding: 0, lineHeight: 1,
+            flexShrink: 0,
+          }}
+          tabIndex={0}
+          aria-label={`${label} 설명`}
+        >?</button>
+      </div>
+      <div style={S.inputWrap}>{children}</div>
+      {/* 툴팁 팝업 (fixed, 패널 우측) */}
+      {open && (
+        <div
+          onMouseEnter={show}
+          onMouseLeave={hide}
+          style={{
+            position: 'fixed',
+            top: Math.min(pos.top, window.innerHeight - 420),
+            left: pos.left,
+            zIndex: 9999,
+            background: '#1e2d4a',
+            border: '1px solid #3a5080',
+            borderRadius: '6px',
+            padding: '0.7rem 0.8rem',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.45)',
+            maxWidth: 380,
+            pointerEvents: 'auto',
+          }}
+        >
+          {tooltip}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // 섹션 헤더 (트리 그룹 제목)
 function GroupHeader({ title, sub }: { title: string; sub?: string }) {
   return (
@@ -1711,6 +1965,71 @@ export default function ColumnPanel() {
             onChange={v => setSec(s => ({ ...s, shape: v }))}
           />
 
+          {/* ── 적용 설계기준 표기 ── */}
+          <div style={{
+            margin: '0.3rem 0.4rem 0.1rem',
+            border: '1px solid var(--border-dark)',
+            borderRadius: '3px',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              background: 'var(--surface-3)',
+              borderBottom: '1px solid var(--border-dark)',
+              padding: '0.2rem 0.55rem',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            }}>
+              <span style={{
+                fontSize: '0.61rem', fontWeight: 800,
+                color: 'var(--text-3)',
+                letterSpacing: '0.1em', textTransform: 'uppercase',
+                fontFamily: "'Pretendard','Apple SD Gothic Neo',sans-serif",
+              }}>적용 설계기준</span>
+              <span style={{
+                fontSize: '0.58rem', color: 'var(--text-disabled)',
+                fontFamily: 'var(--font-mono)',
+              }}>KDS 2022</span>
+            </div>
+            {([
+              ['KDS 14 20 20', '휨 및 압축 (기둥강도 · P-M 상호작용)'],
+              ['KDS 14 20 22', '전단 및 비틀림 (전단강도 Vc)'],
+              ['KDS 14 20 01', '일반사항 (재료기준 · 강도감소계수 φ)'],
+            ] as const).map(([code, desc]) => (
+              <div key={code} style={{
+                display: 'grid',
+                gridTemplateColumns: '7.8rem 1fr',
+                borderBottom: '1px solid var(--border-light)',
+                alignItems: 'stretch',
+              }}>
+                <div style={{
+                  padding: '0.18rem 0.45rem',
+                  borderRight: '1px solid var(--border-light)',
+                  background: 'var(--primary-bg)',
+                  display: 'flex', alignItems: 'center',
+                }}>
+                  <span style={{
+                    fontSize: '0.68rem', fontWeight: 700,
+                    color: 'var(--primary)',
+                    fontFamily: 'var(--font-mono)',
+                    letterSpacing: '0.02em',
+                  }}>{code}</span>
+                </div>
+                <div style={{ padding: '0.18rem 0.45rem', display: 'flex', alignItems: 'center' }}>
+                  <span style={{
+                    fontSize: '0.66rem', color: 'var(--text-2)',
+                    fontFamily: "'Pretendard','Apple SD Gothic Neo',sans-serif",
+                    lineHeight: 1.4,
+                  }}>{desc}</span>
+                </div>
+              </div>
+            ))}
+            <div style={{ padding: '0.16rem 0.5rem', background: 'var(--surface-2)' }}>
+              <span style={{
+                fontSize: '0.61rem', color: 'var(--text-3)',
+                fontFamily: "'Pretendard','Apple SD Gothic Neo',sans-serif",
+              }}>건축·일반 RC 구조물 대상 &middot; 도로교(KDS 24) 미적용</span>
+            </div>
+          </div>
+
           {/* 단면 치수 — shape dependent */}
           <GroupHeader title="Section" sub="mm"/>
           {sec.shape === 'circular' ? (
@@ -2074,12 +2393,12 @@ export default function ColumnPanel() {
           <Row label="Vu (kN)">
             <NumInput value={load.Vu} min={0} step={5} onChange={v => updateLoad(l => ({ ...l, Vu: v }))}/>
           </Row>
-          <Row label="lu (mm)">
+          <RowWithTooltip label="lu (mm)" tooltip={<LuTooltip />}>
             <NumInput value={load.lu} min={0} step={100} onChange={v => updateLoad(l => ({ ...l, lu: v }))}/>
-          </Row>
-          <Row label="K (유효길이)">
+          </RowWithTooltip>
+          <RowWithTooltip label="K (유효길이)" tooltip={<KTooltip />}>
             <NumInput value={load.k} min={0.5} step={0.1} onChange={v => updateLoad(l => ({ ...l, k: v }))}/>
-          </Row>
+          </RowWithTooltip>
 
         </div>
 
