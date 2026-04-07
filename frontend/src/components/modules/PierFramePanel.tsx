@@ -425,6 +425,7 @@ function ModelSVG({ nodes, members, result, geom, copingW,
   const xMax =  copingW / 2 + margin
   const yMin = -1.6
   const yMax = copingTopY + 2.4
+  const xRange = xMax - xMin, yRange = yMax - yMin
 
   const sx = (x: number) => PAD.l + (x - xMin) / (xMax - xMin) * W
   const sy = (y: number) => PAD.t + H - (y - yMin) / (yMax - yMin) * H
@@ -487,7 +488,6 @@ function ModelSVG({ nodes, members, result, geom, copingW,
   const defScale = Math.min((H * 0.03) / maxU, 200)
 
   // 눈금
-  const xRange = xMax - xMin, yRange = yMax - yMin
   const xStep = xRange > 14 ? 2 : xRange > 7 ? 1 : 0.5
   const yStep = yRange > 14 ? 2 : yRange > 7 ? 1 : 0.5
   const xTicks: number[] = [], yTicks: number[] = []
