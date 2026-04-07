@@ -92,11 +92,12 @@ function buildModel(geom: PierGeom, bearingLoads: BearingLoad[]) {
   for (let i = 0; i < colCount; i++)
     colXs.push((i - (colCount - 1) / 2) * colSpacing)
 
-  // 받침 x 좌표  →  코핑 위 균등 배치
+  // 받침 x 좌표  →  기둥 스팬 범위 내 균등 배치
   const bc = geom.bearingCount
+  const bearingSpan = totalColSpan > 0 ? totalColSpan : copingW * 0.5
   const bearingXs: number[] = bc === 1
     ? [0]
-    : Array.from({ length: bc }, (_, i) => (i - (bc - 1) / 2) * (copingW * 0.75 / (bc - 1 || 1)))
+    : Array.from({ length: bc }, (_, i) => (i - (bc - 1) / 2) * (bearingSpan / (bc - 1 || 1)))
 
   // ── 절점 ──
   const nodes: FNode[] = []
@@ -415,13 +416,13 @@ function ModelSVG({ nodes, members, result, geom, copingW,
     }
   }
 
-  // 다이어그램 스케일 — 모델 높이의 15% 기준, 최대값 기반
+  // 다이어그램 스케일 — 모델 좌표 단위 (yRange의 12% 기준)
   const allDiagVals = mfArr.flatMap(mf => {
     const [vi, vj] = getDiagValues(mf)
     return [Math.abs(vi), Math.abs(vj)]
   })
   const maxAbsDiag = Math.max(...allDiagVals, 1)
-  const diagScale = (H * 0.15) / maxAbsDiag
+  const diagScale = (yRange * 0.12) / maxAbsDiag
 
   // 다이어그램 경로 (법선벡터 방향으로 오프셋)
   function diagPath(m: Member): string {
@@ -463,13 +464,14 @@ function ModelSVG({ nodes, members, result, geom, copingW,
   for (let v = Math.ceil(yMin/yStep)*yStep; v <= yMax+0.01; v += yStep) yTicks.push(+v.toFixed(2))
 
   // 코핑 변단면 폴리곤 좌표 계산
+  // 코핑: 상단 평평, 하단이 변단면 (양단부가 얕아져서 하단이 올라감)
   const copLeft  = -copingW / 2
   const copRight =  copingW / 2
-  const copBot   = geom.colHeight   // 코핑 하단 y
-  const copTopC  = copingTopY       // 코핑 상단 y (중앙부)
+  const copTop   = copingTopY                        // 상단 y (평평)
+  const copBotC  = geom.colHeight                    // 하단 중앙 y (가장 깊음)
   const dEnd     = geom.copingDepthEnd
-  const copTopL  = copBot + dEnd    // 좌단 상단
-  const copTopR  = copBot + dEnd    // 우단 상단
+  const copBotL  = copTop - dEnd                     // 좌단 하단 y (얕음)
+  const copBotR  = copTop - dEnd                     // 우단 하단 y (얕음)
   // 외측 기둥 x 좌표
   const colXs = Array.from({ length: geom.colCount }, (_, i) =>
     (i - (geom.colCount - 1) / 2) * geom.colSpacing)
@@ -479,26 +481,24 @@ function ModelSVG({ nodes, members, result, geom, copingW,
   // 변단면 여부
   const isTapered = Math.abs(geom.copingDepth - dEnd) > 0.01
 
-  // 코핑 폴리곤 점들 (좌→우 하단, 우→좌 상단)
+  // 코핑 폴리곤: 상단 평평 + 하단 변단면
   const copPoints: string = isTapered
     ? [
-        // 하단 (좌→우)
-        `${sx(copLeft).toFixed(1)},${sy(copBot).toFixed(1)}`,
-        `${sx(copRight).toFixed(1)},${sy(copBot).toFixed(1)}`,
-        // 우단 상단
-        `${sx(copRight).toFixed(1)},${sy(copTopR).toFixed(1)}`,
-        // 우측 기둥 위치에서 중앙 깊이로 올라감
-        `${sx(outerR).toFixed(1)},${sy(copTopC).toFixed(1)}`,
-        // 좌측 기둥 위치에서 중앙 깊이
-        `${sx(outerL).toFixed(1)},${sy(copTopC).toFixed(1)}`,
-        // 좌단 상단
-        `${sx(copLeft).toFixed(1)},${sy(copTopL).toFixed(1)}`,
+        // 상단 (좌→우, 평평)
+        `${sx(copLeft).toFixed(1)},${sy(copTop).toFixed(1)}`,
+        `${sx(copRight).toFixed(1)},${sy(copTop).toFixed(1)}`,
+        // 하단 (우→좌, 변단면: 양단 얕고 기둥구간 깊음)
+        `${sx(copRight).toFixed(1)},${sy(copBotR).toFixed(1)}`,   // 우단 하단 (얕음)
+        `${sx(outerR).toFixed(1)},${sy(copBotC).toFixed(1)}`,     // 우측 기둥 외측 (깊음)
+        `${sx(outerL).toFixed(1)},${sy(copBotC).toFixed(1)}`,     // 좌측 기둥 외측 (깊음)
+        `${sx(copLeft).toFixed(1)},${sy(copBotL).toFixed(1)}`,    // 좌단 하단 (얕음)
       ].join(' ')
     : [
-        `${sx(copLeft).toFixed(1)},${sy(copBot).toFixed(1)}`,
-        `${sx(copRight).toFixed(1)},${sy(copBot).toFixed(1)}`,
-        `${sx(copRight).toFixed(1)},${sy(copTopC).toFixed(1)}`,
-        `${sx(copLeft).toFixed(1)},${sy(copTopC).toFixed(1)}`,
+        // 등단면: 직사각형
+        `${sx(copLeft).toFixed(1)},${sy(copTop).toFixed(1)}`,
+        `${sx(copRight).toFixed(1)},${sy(copTop).toFixed(1)}`,
+        `${sx(copRight).toFixed(1)},${sy(copBotC).toFixed(1)}`,
+        `${sx(copLeft).toFixed(1)},${sy(copBotC).toFixed(1)}`,
       ].join(' ')
 
   const diagCol = DIAGRAM_COLORS[diagram]
