@@ -1,34 +1,32 @@
 import { useState, useMemo } from 'react'
 
 // ════════════════════════════════════════════════════════════════
-//  2D 교각 골조해석 (Direct Stiffness Method)
-//  KDS 24 14 21 : 2021  도로교설계기준
+//  2D 교각 골조해석  —  Direct Stiffness Method
+//  KDS 24 14 21 : 2021  도로교설계기준 (한계상태설계법)
 // ════════════════════════════════════════════════════════════════
 
-// ── 타입 정의 ───────────────────────────────────────────────────
-interface Node {
+// ────────────────────────────────────────────────────────────────
+//  타입
+// ────────────────────────────────────────────────────────────────
+interface FNode {
   id: number
   x: number   // m
   y: number   // m
-  bc: [boolean, boolean, boolean]  // [Dx, Dy, Rz] 고정여부
+  bc: [boolean, boolean, boolean]   // [Dx, Dy, Rz]
+  isBearing?: boolean
+  bearingIdx?: number
 }
 
 interface Member {
   id: number
-  ni: number   // 시작절점 id
-  nj: number   // 끝절점 id
+  ni: number; nj: number
   E: number    // MPa
   A: number    // mm²
   I: number    // mm⁴
   type: 'coping' | 'column'
 }
 
-interface PointLoad {
-  nodeId: number
-  Fx: number   // kN
-  Fy: number   // kN
-  Mz: number   // kN·m
-}
+interface PointLoad { nodeId: number; Fx: number; Fy: number; Mz: number }
 
 interface AnalysisResult {
   U: number[]
@@ -51,667 +49,812 @@ interface PierGeom {
   bearingCount: number
 }
 
-interface BearingLoad {
-  id: number
-  Fy: number   // kN
-  Fx: number   // kN
-  Mz: number   // kN·m
-}
+interface BearingLoad { id: number; Fy: number; Fx: number; Mz: number }
 
+// ────────────────────────────────────────────────────────────────
+//  기본값
+// ────────────────────────────────────────────────────────────────
 const DEFAULT_GEOM: PierGeom = {
   colCount: 2, colSpacing: 6.0, colHeight: 8.0,
   copingDepth: 1.5, colWidth: 1.2, colDepth: 1.5,
   fck: 30, bearingCount: 2,
 }
-
 const DEFAULT_BEARING_LOADS: BearingLoad[] = [
   { id: 1, Fy: 2500, Fx: 80, Mz: 0 },
   { id: 2, Fy: 2500, Fx: 80, Mz: 0 },
 ]
 
-// ── 콘크리트 탄성계수 ────────────────────────────────────────────
-function Ec(fck: number) { return 8500 * Math.pow(fck + 4, 1/3) }
+function Ec(fck: number) { return 8500 * Math.pow(fck + 4, 1 / 3) }
 
-// ── 골조 모델 생성 ───────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────
+//  골조 모델 생성  (받침 절점을 코핑 위 독립 절점으로 생성)
+// ────────────────────────────────────────────────────────────────
 function buildModel(geom: PierGeom, bearingLoads: BearingLoad[]) {
   const { colCount, colSpacing, colHeight, copingDepth, colWidth, colDepth, fck } = geom
   const E = Ec(fck)
 
   const totalColSpan = colCount > 1 ? (colCount - 1) * colSpacing : 0
-  const copingW = totalColSpan + colWidth * 2
+  const copingW      = totalColSpan + colWidth * 2
+  const copingY      = colHeight           // 코핑 하단 = 기둥 상단
+  const copingTopY   = colHeight + copingDepth
 
-  const Ac = colWidth * colDepth * 1e6          // mm²
-  const Ic = colWidth * Math.pow(colDepth, 3) / 12 * 1e12  // mm⁴
-  const Acop = copingW * copingDepth * 1e6
-  const Icop = copingW * Math.pow(copingDepth, 3) / 12 * 1e12
+  const Ac   = colWidth * colDepth * 1e6
+  const Ic   = colWidth * Math.pow(colDepth, 3) / 12 * 1e12
+  const Acop = copingW  * copingDepth      * 1e6
+  const Icop = copingW  * Math.pow(copingDepth, 3) / 12 * 1e12
 
-  const nodes: Node[] = []
+  // 기둥 x 좌표
+  const colXs: number[] = []
+  for (let i = 0; i < colCount; i++)
+    colXs.push((i - (colCount - 1) / 2) * colSpacing)
+
+  // 받침 x 좌표  →  코핑 위 균등 배치
+  const bc = geom.bearingCount
+  const bearingXs: number[] = bc === 1
+    ? [0]
+    : Array.from({ length: bc }, (_, i) => (i - (bc - 1) / 2) * (copingW * 0.75 / (bc - 1 || 1)))
+
+  // ── 절점 ──
+  const nodes: FNode[] = []
   let nid = 1
 
-  const colXs: number[] = []
-  for (let i = 0; i < colCount; i++) {
-    colXs.push((i - (colCount - 1) / 2) * colSpacing)
-  }
-
-  const baseNodeIds: number[] = []
+  // 기초 (고정단)
+  const baseIds: number[] = []
   for (const x of colXs) {
     nodes.push({ id: nid, x, y: 0, bc: [true, true, true] })
-    baseNodeIds.push(nid++)
+    baseIds.push(nid++)
   }
 
-  const topNodeIds: number[] = []
+  // 기둥 상단 = 코핑 하단 절점
+  const topIds: number[] = []
   for (const x of colXs) {
-    nodes.push({ id: nid, x, y: colHeight, bc: [false, false, false] })
-    topNodeIds.push(nid++)
+    nodes.push({ id: nid, x, y: copingY, bc: [false, false, false] })
+    topIds.push(nid++)
   }
 
+  // 받침 절점 (코핑 상단)
+  const bearingNodeIds: number[] = []
+  for (let bi = 0; bi < bc; bi++) {
+    nodes.push({
+      id: nid, x: bearingXs[bi], y: copingTopY,
+      bc: [false, false, false],
+      isBearing: true, bearingIdx: bi,
+    })
+    bearingNodeIds.push(nid++)
+  }
+
+  // ── 부재 ──
   const members: Member[] = []
   let mid = 1
 
-  for (let i = 0; i < colCount; i++) {
-    members.push({ id: mid++, ni: baseNodeIds[i], nj: topNodeIds[i], E, A: Ac, I: Ic, type: 'column' })
-  }
-  for (let i = 0; i < colCount - 1; i++) {
-    members.push({ id: mid++, ni: topNodeIds[i], nj: topNodeIds[i + 1], E, A: Acop, I: Icop, type: 'coping' })
-  }
+  // 기둥
+  for (let i = 0; i < colCount; i++)
+    members.push({ id: mid++, ni: baseIds[i], nj: topIds[i], E, A: Ac, I: Ic, type: 'column' })
 
-  // 받침 하중 → 가장 가까운 기둥 상단 절점에 분배
-  const pointLoads: PointLoad[] = []
-  const count = geom.bearingCount
-  const bearingXs = count === 1
-    ? [0]
-    : Array.from({length:count},(_,i)=>(i-(count-1)/2)*(copingW/count))
+  // 코핑 절점 집합 = 기둥 상단 + 받침 절점, x 순서로 정렬
+  const copingNodeSet = [
+    ...topIds.map(id => ({ id, x: nodes.find(n => n.id === id)!.x })),
+    ...bearingNodeIds.map(id => ({ id, x: nodes.find(n => n.id === id)!.x })),
+  ].sort((a, b) => a.x - b.x)
 
-  for (let bi = 0; bi < Math.min(bearingLoads.length, count); bi++) {
-    const bx = bearingXs[bi]
-    const load = bearingLoads[bi]
-    let minDist = Infinity, targetNid = topNodeIds[0]
-    for (let i = 0; i < colCount; i++) {
-      const dist = Math.abs(colXs[i] - bx)
-      if (dist < minDist) { minDist = dist; targetNid = topNodeIds[i] }
-    }
-    const existing = pointLoads.find(p => p.nodeId === targetNid)
-    if (existing) {
-      existing.Fx += load.Fx; existing.Fy += load.Fy; existing.Mz += load.Mz
-    } else {
-      pointLoads.push({ nodeId: targetNid, Fx: load.Fx, Fy: load.Fy, Mz: load.Mz })
-    }
-  }
+  // 코핑 부재: 정렬된 절점 순서로 연결
+  for (let i = 0; i < copingNodeSet.length - 1; i++)
+    members.push({
+      id: mid++,
+      ni: copingNodeSet[i].id, nj: copingNodeSet[i + 1].id,
+      E, A: Acop, I: Icop, type: 'coping',
+    })
 
-  return { nodes, members, pointLoads, copingW, colXs, baseNodeIds, topNodeIds, bearingXs }
+  // ── 하중 벡터 ──
+  const pointLoads: PointLoad[] = bearingLoads
+    .slice(0, bc)
+    .map((bl, bi) => ({
+      nodeId: bearingNodeIds[bi],
+      Fx: bl.Fx, Fy: bl.Fy, Mz: bl.Mz,
+    }))
+
+  return { nodes, members, pointLoads, copingW, colXs, baseIds, topIds, bearingNodeIds, bearingXs, copingTopY }
 }
 
-// ── Direct Stiffness Method ──────────────────────────────────────
+// ────────────────────────────────────────────────────────────────
+//  행렬 유틸
+// ────────────────────────────────────────────────────────────────
 function transpose(A: number[][]): number[][] {
-  return A[0].map((_, j) => A.map(row => row[j]))
+  return A[0].map((_, j) => A.map(r => r[j]))
 }
 function matMul(A: number[][], B: number[][]): number[][] {
-  const n = A.length, m = B[0].length, p = B.length
-  return Array.from({length:n},(_,i)=>Array.from({length:m},(__,j)=>
-    Array.from({length:p},(___, k)=>A[i][k]*B[k][j]).reduce((a,b)=>a+b,0)))
+  return A.map((ar, i) => B[0].map((_, j) => ar.reduce((s, _, k) => s + A[i][k] * B[k][j], 0)))
 }
 function matVec(A: number[][], v: number[]): number[] {
-  return A.map(row=>row.reduce((s,a,j)=>s+a*v[j],0))
+  return A.map(r => r.reduce((s, a, j) => s + a * v[j], 0))
 }
 function gaussElim(Kin: number[][], Fin: number[]): number[] {
   const n = Fin.length
-  const A = Kin.map((r,i)=>[...r,Fin[i]])
-  for (let col=0;col<n;col++){
-    let maxRow=col
-    for (let r=col+1;r<n;r++) if(Math.abs(A[r][col])>Math.abs(A[maxRow][col])) maxRow=r
-    ;[A[col],A[maxRow]]=[A[maxRow],A[col]]
-    if(Math.abs(A[col][col])<1e-14) continue
-    for(let r=col+1;r<n;r++){
-      const f=A[r][col]/A[col][col]
-      for(let c=col;c<=n;c++) A[r][c]-=f*A[col][c]
+  const A = Kin.map((r, i) => [...r, Fin[i]])
+  for (let c = 0; c < n; c++) {
+    let mx = c
+    for (let r = c + 1; r < n; r++) if (Math.abs(A[r][c]) > Math.abs(A[mx][c])) mx = r
+    ;[A[c], A[mx]] = [A[mx], A[c]]
+    if (Math.abs(A[c][c]) < 1e-14) continue
+    for (let r = c + 1; r < n; r++) {
+      const f = A[r][c] / A[c][c]
+      for (let cc = c; cc <= n; cc++) A[r][cc] -= f * A[c][cc]
     }
   }
-  const x=new Array(n).fill(0)
-  for(let i=n-1;i>=0;i--){
-    x[i]=A[i][n]
-    for(let j=i+1;j<n;j++) x[i]-=A[i][j]*x[j]
-    x[i]/=A[i][i]||1
+  const x = new Array(n).fill(0)
+  for (let i = n - 1; i >= 0; i--) {
+    x[i] = A[i][n]
+    for (let j = i + 1; j < n; j++) x[i] -= A[i][j] * x[j]
+    x[i] /= A[i][i] || 1
   }
   return x
 }
 
-function solveFrame(nodes: Node[], members: Member[], pointLoads: PointLoad[]): AnalysisResult {
+// ────────────────────────────────────────────────────────────────
+//  Direct Stiffness Method 해석
+// ────────────────────────────────────────────────────────────────
+function solveFrame(nodes: FNode[], members: Member[], pointLoads: PointLoad[]): AnalysisResult {
   const nDOF = nodes.length * 3
-  const nodeIdx = new Map(nodes.map((n,i)=>[n.id,i]))
-  const K = Array.from({length:nDOF},()=>new Array(nDOF).fill(0))
-  const F = new Array(nDOF).fill(0)
+  const idx  = new Map(nodes.map((n, i) => [n.id, i]))
+  const K    = Array.from({ length: nDOF }, () => new Array(nDOF).fill(0))
+  const F    = new Array(nDOF).fill(0)
 
   for (const m of members) {
-    const ni = nodeIdx.get(m.ni)!, nj = nodeIdx.get(m.nj)!
-    const xi=nodes[ni].x,yi=nodes[ni].y,xj=nodes[nj].x,yj=nodes[nj].y
-    const L=Math.sqrt((xj-xi)**2+(yj-yi)**2)
-    if(L<1e-12) continue
-    const EA=m.E*1e3*m.A*1e-6
-    const EI=m.E*1e3*m.I*1e-12
-    const c=(xj-xi)/L, s=(yj-yi)/L
+    const ni = idx.get(m.ni)!, nj = idx.get(m.nj)!
+    const { x: xi, y: yi } = nodes[ni], { x: xj, y: yj } = nodes[nj]
+    const L = Math.sqrt((xj - xi) ** 2 + (yj - yi) ** 2)
+    if (L < 1e-12) continue
 
-    const kL:number[][]=[
-      [EA/L,0,0,-EA/L,0,0],
-      [0,12*EI/L**3,6*EI/L**2,0,-12*EI/L**3,6*EI/L**2],
-      [0,6*EI/L**2,4*EI/L,0,-6*EI/L**2,2*EI/L],
-      [-EA/L,0,0,EA/L,0,0],
-      [0,-12*EI/L**3,-6*EI/L**2,0,12*EI/L**3,-6*EI/L**2],
-      [0,6*EI/L**2,2*EI/L,0,-6*EI/L**2,4*EI/L],
+    // m 단위 환산: E[MPa]=E[kN/m²]/1000, A[mm²]→[m²]/1e6, I[mm⁴]→[m⁴]/1e12
+    const EA = (m.E / 1e3) * (m.A / 1e6)   // kN
+    const EI = (m.E / 1e3) * (m.I / 1e12)  // kN·m²
+
+    const c = (xj - xi) / L, s = (yj - yi) / L
+    const kL: number[][] = [
+      [ EA/L,           0,          0,  -EA/L,           0,          0 ],
+      [    0,  12*EI/L**3,  6*EI/L**2,      0, -12*EI/L**3,  6*EI/L**2 ],
+      [    0,   6*EI/L**2,    4*EI/L,       0,  -6*EI/L**2,    2*EI/L  ],
+      [-EA/L,           0,          0,   EA/L,           0,          0 ],
+      [    0, -12*EI/L**3, -6*EI/L**2,     0,  12*EI/L**3, -6*EI/L**2 ],
+      [    0,   6*EI/L**2,    2*EI/L,       0,  -6*EI/L**2,    4*EI/L  ],
     ]
-    const T:number[][]=Array.from({length:6},()=>new Array(6).fill(0))
-    T[0][0]=c;T[0][1]=s;T[1][0]=-s;T[1][1]=c;T[2][2]=1
-    T[3][3]=c;T[3][4]=s;T[4][3]=-s;T[4][4]=c;T[5][5]=1
-    const kG=matMul(matMul(transpose(T),kL),T)
-    const dofs=[ni*3,ni*3+1,ni*3+2,nj*3,nj*3+1,nj*3+2]
-    for(let r=0;r<6;r++) for(let cc=0;cc<6;cc++) K[dofs[r]][dofs[cc]]+=kG[r][cc]
+    const T: number[][] = Array.from({ length: 6 }, () => new Array(6).fill(0))
+    T[0][0]=c; T[0][1]=s; T[1][0]=-s; T[1][1]=c; T[2][2]=1
+    T[3][3]=c; T[3][4]=s; T[4][3]=-s; T[4][4]=c; T[5][5]=1
+
+    const kG = matMul(matMul(transpose(T), kL), T)
+    const d  = [ni*3, ni*3+1, ni*3+2, nj*3, nj*3+1, nj*3+2]
+    for (let r = 0; r < 6; r++)
+      for (let cc = 0; cc < 6; cc++)
+        K[d[r]][d[cc]] += kG[r][cc]
   }
 
-  for(const pl of pointLoads){
-    const ni=nodeIdx.get(pl.nodeId)!
-    F[ni*3]+=pl.Fx; F[ni*3+1]+=pl.Fy; F[ni*3+2]+=pl.Mz
+  for (const pl of pointLoads) {
+    const ni = idx.get(pl.nodeId)!
+    F[ni*3] += pl.Fx; F[ni*3+1] += pl.Fy; F[ni*3+2] += pl.Mz
   }
 
-  const PENALTY=1e15
-  for(const node of nodes){
-    const ni=nodeIdx.get(node.id)!
-    const [bx,by,br]=node.bc
-    if(bx) K[ni*3][ni*3]+=PENALTY
-    if(by) K[ni*3+1][ni*3+1]+=PENALTY
-    if(br) K[ni*3+2][ni*3+2]+=PENALTY
+  const PENALTY = 1e15
+  for (const n of nodes) {
+    const ni = idx.get(n.id)!
+    if (n.bc[0]) K[ni*3  ][ni*3  ] += PENALTY
+    if (n.bc[1]) K[ni*3+1][ni*3+1] += PENALTY
+    if (n.bc[2]) K[ni*3+2][ni*3+2] += PENALTY
   }
 
-  const U=gaussElim(K,F)
+  const U = gaussElim(K, F)
 
-  const reactions=nodes
-    .filter(n=>n.bc.some(Boolean))
-    .map(n=>{
-      const ni=nodeIdx.get(n.id)!
-      const [bx,by,br]=n.bc
+  const reactions = nodes
+    .filter(n => n.bc.some(Boolean))
+    .map(n => {
+      const ni = idx.get(n.id)!
       return {
-        nodeId:n.id,
-        Fx:bx?PENALTY*U[ni*3]:0,
-        Fy:by?PENALTY*U[ni*3+1]:0,
-        Mz:br?PENALTY*U[ni*3+2]:0,
+        nodeId: n.id,
+        Fx: n.bc[0] ? PENALTY * U[ni*3  ] : 0,
+        Fy: n.bc[1] ? PENALTY * U[ni*3+1] : 0,
+        Mz: n.bc[2] ? PENALTY * U[ni*3+2] : 0,
       }
     })
 
-  const memberForces=members.map(m=>{
-    const ni=nodeIdx.get(m.ni)!, nj=nodeIdx.get(m.nj)!
-    const xi=nodes[ni].x,yi=nodes[ni].y,xj=nodes[nj].x,yj=nodes[nj].y
-    const L=Math.sqrt((xj-xi)**2+(yj-yi)**2)
-    if(L<1e-12) return {memberId:m.id,Ni:0,Vi:0,Mi:0,Nj:0,Vj:0,Mj:0}
-    const EA=m.E*1e3*m.A*1e-6, EI=m.E*1e3*m.I*1e-12
-    const c=(xj-xi)/L, s=(yj-yi)/L
-    const kL:number[][]=[
-      [EA/L,0,0,-EA/L,0,0],
+  const memberForces = members.map(m => {
+    const ni = idx.get(m.ni)!, nj = idx.get(m.nj)!
+    const { x: xi, y: yi } = nodes[ni], { x: xj, y: yj } = nodes[nj]
+    const L = Math.sqrt((xj-xi)**2 + (yj-yi)**2)
+    if (L < 1e-12) return { memberId: m.id, Ni:0, Vi:0, Mi:0, Nj:0, Vj:0, Mj:0 }
+
+    const EA = (m.E/1e3)*(m.A/1e6), EI = (m.E/1e3)*(m.I/1e12)
+    const c = (xj-xi)/L, s = (yj-yi)/L
+    const kL: number[][] = [
+      [ EA/L,0,0,-EA/L,0,0],
       [0,12*EI/L**3,6*EI/L**2,0,-12*EI/L**3,6*EI/L**2],
       [0,6*EI/L**2,4*EI/L,0,-6*EI/L**2,2*EI/L],
       [-EA/L,0,0,EA/L,0,0],
       [0,-12*EI/L**3,-6*EI/L**2,0,12*EI/L**3,-6*EI/L**2],
       [0,6*EI/L**2,2*EI/L,0,-6*EI/L**2,4*EI/L],
     ]
-    const T:number[][]=Array.from({length:6},()=>new Array(6).fill(0))
+    const T: number[][] = Array.from({length:6},()=>new Array(6).fill(0))
     T[0][0]=c;T[0][1]=s;T[1][0]=-s;T[1][1]=c;T[2][2]=1
     T[3][3]=c;T[3][4]=s;T[4][3]=-s;T[4][4]=c;T[5][5]=1
-    const uG=[U[ni*3],U[ni*3+1],U[ni*3+2],U[nj*3],U[nj*3+1],U[nj*3+2]]
-    const uL=matVec(T,uG)
-    const fL=matVec(kL,uL)
-    return {memberId:m.id,Ni:fL[0],Vi:fL[1],Mi:fL[2],Nj:fL[3],Vj:fL[4],Mj:fL[5]}
+
+    const uG = [U[ni*3],U[ni*3+1],U[ni*3+2],U[nj*3],U[nj*3+1],U[nj*3+2]]
+    const fL = matVec(kL, matVec(T, uG))
+    return { memberId: m.id, Ni:fL[0], Vi:fL[1], Mi:fL[2], Nj:fL[3], Vj:fL[4], Mj:fL[5] }
   })
 
-  return {U,reactions,memberForces}
+  return { U, reactions, memberForces }
 }
 
-// ── UI 헬퍼 ─────────────────────────────────────────────────────
-function GH({title,sub}:{title:string;sub?:string}) {
+// ────────────────────────────────────────────────────────────────
+//  UI 헬퍼
+// ────────────────────────────────────────────────────────────────
+function GH({ title, sub }: { title: string; sub?: string }) {
   return (
-    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',
-      padding:'0.28rem 0.6rem',background:'var(--surface-3)',
-      borderBottom:'1px solid var(--border-dark)',borderTop:'1px solid var(--border-dark)',marginTop:'0.15rem'}}>
-      <span style={{fontSize:'0.7rem',fontWeight:700,color:'var(--text-2)',letterSpacing:'0.04em',fontFamily:'var(--font-mono)'}}>{title}</span>
-      {sub&&<span style={{fontSize:'0.6rem',color:'var(--text-disabled)',fontFamily:'var(--font-mono)'}}>{sub}</span>}
+    <div style={{
+      display:'flex', alignItems:'center', justifyContent:'space-between',
+      padding:'0.28rem 0.6rem',
+      background:'#f0f2f5', borderBottom:'1px solid #d0d6e0', borderTop:'1px solid #d0d6e0',
+      marginTop:'0.15rem',
+    }}>
+      <span style={{ fontSize:'0.7rem', fontWeight:700, color:'#2a3550', letterSpacing:'0.05em', fontFamily:'var(--font-mono)' }}>{title}</span>
+      {sub && <span style={{ fontSize:'0.6rem', color:'#8899bb', fontFamily:'var(--font-mono)' }}>{sub}</span>}
     </div>
   )
 }
-function Row({label,children}:{label:string;children:React.ReactNode}) {
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div style={{display:'grid',gridTemplateColumns:'8rem 1fr',alignItems:'center',borderBottom:'1px solid var(--border-light)',minHeight:'1.85rem'}}>
-      <div style={{fontSize:'0.7rem',fontWeight:600,color:'var(--text-2)',padding:'0.2rem 0.5rem',
-        borderRight:'1px solid var(--border-light)',background:'var(--surface-2)',
-        height:'100%',display:'flex',alignItems:'center',whiteSpace:'nowrap',fontFamily:'var(--font-mono)'}}>{label}</div>
-      <div style={{padding:'0.15rem 0.3rem'}}>{children}</div>
+    <div style={{ display:'grid', gridTemplateColumns:'8rem 1fr', alignItems:'center',
+      borderBottom:'1px solid #e4e8f0', minHeight:'1.85rem' }}>
+      <div style={{ fontSize:'0.7rem', fontWeight:600, color:'#3a4a6a', padding:'0.2rem 0.5rem',
+        borderRight:'1px solid #e4e8f0', background:'#f5f7fa',
+        height:'100%', display:'flex', alignItems:'center', whiteSpace:'nowrap', fontFamily:'var(--font-mono)' }}>
+        {label}
+      </div>
+      <div style={{ padding:'0.15rem 0.3rem' }}>{children}</div>
     </div>
   )
 }
-function Num({value,min,max,step=1,onChange}:{value:number;min?:number;max?:number;step?:number;onChange:(v:number)=>void}) {
+
+function Num({ value, min, max, step=1, onChange }: {
+  value:number; min?:number; max?:number; step?:number; onChange:(v:number)=>void
+}) {
   return (
     <input type="number" value={value} min={min} max={max} step={step}
-      onChange={e=>onChange(Number(e.target.value))}
-      style={{width:'100%',fontSize:'0.78rem',fontFamily:'var(--font-mono)',padding:'0.1rem 0.25rem'}}/>
+      onChange={e => onChange(Number(e.target.value))}
+      style={{ width:'100%', fontSize:'0.78rem', fontFamily:'var(--font-mono)', padding:'0.1rem 0.25rem',
+        border:'1px solid #c8d0e0', borderRadius:'2px', background:'#fff', color:'#1a2540' }}
+    />
   )
 }
 
-// ── 2D 모델링 SVG ────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────
+//  2D 모델링 SVG
+// ────────────────────────────────────────────────────────────────
 interface ModelSVGProps {
-  nodes: Node[]; members: Member[]; result: AnalysisResult | null
-  colHeight: number; copingW: number; copingDepth: number; geom: PierGeom
-  bearingLoads: BearingLoad[]; bearingXs: number[]
+  nodes: FNode[]; members: Member[]; result: AnalysisResult | null
+  geom: PierGeom; copingW: number
+  bearingLoads: BearingLoad[]; bearingXs: number[]; bearingNodeIds: number[]
+  copingTopY: number
   showBMD: boolean; showDeformed: boolean
 }
 
-function ModelSVG({nodes,members,result,colHeight,copingW,copingDepth,geom,bearingLoads,bearingXs,showBMD,showDeformed}:ModelSVGProps) {
-  const VW=720,VH=520
-  const PAD={l:72,r:36,t:56,b:64}
-  const W=VW-PAD.l-PAD.r, H=VH-PAD.t-PAD.b
+// 디자인 팔레트 (흰 배경 기반)
+const C = {
+  bg:       '#ffffff',
+  bgPanel:  '#f8f9fc',
+  grid:     '#e8ecf4',
+  gridMaj:  '#cdd4e4',
+  axis:     '#8899bb',
+  gl:       '#7a9abf',          // 지반선
+  column:   '#2d6fa8',          // 기둥 fill
+  colStroke:'#1a4e80',
+  coping:   '#3a82c4',          // 코핑 fill
+  copStroke:'#1a5a9a',
+  centerline:'#a0b8d8',
+  bmd:      '#e05030',          // BMD — 붉은 계열
+  bmdFill:  'rgba(220,80,50,0.10)',
+  deformed: '#f0a020',          // 변형 — 황금색
+  bearing:  '#cc2222',          // 받침 절점 — 붉은점
+  loadArr:  '#d45000',          // 하중 화살표
+  loadTxt:  '#b03000',
+  rxnArr:   '#1a7a40',          // 반력 화살표
+  rxnTxt:   '#155a30',
+  fixedFill:'#ccd8ee',
+  fixedStr: '#7a9abf',
+  nodeFree: '#2d6fa8',
+  dimLine:  '#8899bb',
+  label:    '#2a3a5a',
+  labelSub: '#7a8aaa',
+  title:    '#1a2a4a',
+}
 
-  const margin=Math.max(copingW*0.25,1.8)
-  const xMin=-copingW/2-margin, xMax=copingW/2+margin
-  const yMin=-1.4, yMax=colHeight+copingDepth+2.2
+function ModelSVG({ nodes, members, result, geom, copingW,
+  bearingLoads, bearingXs: _bearingXs, bearingNodeIds, copingTopY,
+  showBMD, showDeformed }: ModelSVGProps) {
 
-  const sx=(x:number)=>PAD.l+(x-xMin)/(xMax-xMin)*W
-  const sy=(y:number)=>PAD.t+H-(y-yMin)/(yMax-yMin)*H
+  const VW = 720, VH = 520
+  const PAD = { l:72, r:40, t:70, b:64 }
+  const W = VW - PAD.l - PAD.r
+  const H = VH - PAD.t - PAD.b
 
-  // 부재력 최대값
-  const mfArr=result?.memberForces??[]
-  const maxAbsM=Math.max(...mfArr.flatMap(mf=>[Math.abs(mf.Mi),Math.abs(mf.Mj)]),1)
-  const bmdScale=(H*0.20)/maxAbsM
+  const margin = Math.max(copingW * 0.3, 2.0)
+  const xMin = -copingW / 2 - margin
+  const xMax =  copingW / 2 + margin
+  const yMin = -1.6
+  const yMax = copingTopY + 2.4
 
-  // 부재 폭 (화면 픽셀 기준)
-  const colPxW=Math.max((geom.colWidth/(xMax-xMin))*W,8)
-  const copPxH=Math.max((copingDepth/(yMax-yMin))*H,8)
+  const sx = (x: number) => PAD.l + (x - xMin) / (xMax - xMin) * W
+  const sy = (y: number) => PAD.t + H - (y - yMin) / (yMax - yMin) * H
 
-  const nodeMap=new Map(nodes.map(n=>[n.id,n]))
+  // 단면 폭 픽셀
+  const pxPerM = W / (xMax - xMin)
+  const colPxW = Math.max(geom.colWidth * pxPerM, 6)
+  const copPxH = Math.max(geom.copingDepth * pxPerM, 6)
 
-  // BMD 경로 생성
-  function bmdPath(_m:Member,ni:Node,nj:Node,mf:typeof mfArr[0]):string {
-    const L=Math.sqrt((nj.x-ni.x)**2+(nj.y-ni.y)**2)
-    const nx=-(nj.y-ni.y)/L, ny=(nj.x-ni.x)/L
-    const pts=24
-    const coords:string[]=[]
-    for(let i=0;i<=pts;i++){
-      const t=i/pts
-      // 선형보간 (집중하중만 있으므로 선형 BMD)
-      const M=mf.Mi*(1-t)+(-mf.Mj)*t
-      const px=ni.x+t*(nj.x-ni.x)+M*bmdScale*nx
-      const py=ni.y+t*(nj.y-ni.y)+M*bmdScale*ny
-      coords.push(`${i===0?'M':'L'}${sx(px).toFixed(1)},${sy(py).toFixed(1)}`)
+  const nodeMap = new Map(nodes.map(n => [n.id, n]))
+
+  // BMD 스케일 — 화면 높이의 20% 기준
+  const mfArr = result?.memberForces ?? []
+  const maxAbsM = Math.max(...mfArr.flatMap(mf => [Math.abs(mf.Mi), Math.abs(mf.Mj)]), 1)
+  const bmdScale = (H * 0.20) / maxAbsM
+
+  // BMD 경로  (법선벡터: 부재 왼쪽 방향, 인장측 기준)
+  function bmdPath(m: Member): string {
+    const ni = nodeMap.get(m.ni)!, nj = nodeMap.get(m.nj)!
+    const dx = nj.x - ni.x, dy = nj.y - ni.y
+    const L  = Math.sqrt(dx*dx + dy*dy)
+    if (L < 1e-12) return ''
+    // 법선 (부재 왼쪽 — i→j 방향에서 반시계)
+    const nx = -dy / L, ny = dx / L
+
+    const mf = mfArr.find(f => f.memberId === m.id)
+    if (!mf) return ''
+
+    const SEGS = 20
+    const pts: string[] = []
+    for (let k = 0; k <= SEGS; k++) {
+      const t  = k / SEGS
+      // 선형 BMD: Mi at t=0, -Mj at t=1  (부재력 부호: Mi = 시작단 모멘트)
+      const M  = mf.Mi * (1 - t) + mf.Mj * t
+      const px = ni.x + t * dx + M * bmdScale * nx
+      const py = ni.y + t * dy + M * bmdScale * ny
+      pts.push(`${k === 0 ? 'M' : 'L'}${sx(px).toFixed(1)},${sy(py).toFixed(1)}`)
     }
-    coords.push(`L${sx(nj.x).toFixed(1)},${sy(nj.y).toFixed(1)}`)
-    coords.push(`L${sx(ni.x).toFixed(1)},${sy(ni.y).toFixed(1)}`)
-    coords.push('Z')
-    return coords.join(' ')
+    pts.push(`L${sx(nj.x).toFixed(1)},${sy(nj.y).toFixed(1)}`)
+    pts.push(`L${sx(ni.x).toFixed(1)},${sy(ni.y).toFixed(1)}`)
+    pts.push('Z')
+    return pts.join(' ')
   }
 
-  // 변형 배율
-  const maxU=result?Math.max(...result.U.map(Math.abs),1e-9):1e-9
-  const defScale=Math.min((H*0.04)/maxU,5e6)
+  // 변형 배율 — 화면 높이의 3% 한계
+  const maxU = result ? Math.max(...result.U.filter(isFinite).map(Math.abs), 1e-12) : 1e-12
+  const defScale = Math.min((H * 0.03) / maxU, 200)   // 최대 200배 상한
 
-  // 눈금 생성
-  const xRange=xMax-xMin, yRange=yMax-yMin
-  const xStep=xRange>10?2:xRange>5?1:0.5
-  const yStep=yRange>10?2:yRange>5?1:0.5
-  const xTicks:number[]=[], yTicks:number[]=[]
-  for(let v=Math.ceil(xMin/xStep)*xStep;v<=xMax+0.01;v+=xStep) xTicks.push(+v.toFixed(2))
-  for(let v=Math.ceil(yMin/yStep)*yStep;v<=yMax+0.01;v+=yStep) yTicks.push(+v.toFixed(2))
+  // 눈금
+  const xRange = xMax - xMin, yRange = yMax - yMin
+  const xStep = xRange > 14 ? 2 : xRange > 7 ? 1 : 0.5
+  const yStep = yRange > 14 ? 2 : yRange > 7 ? 1 : 0.5
+  const xTicks: number[] = [], yTicks: number[] = []
+  for (let v = Math.ceil(xMin/xStep)*xStep; v <= xMax+0.01; v += xStep) xTicks.push(+v.toFixed(2))
+  for (let v = Math.ceil(yMin/yStep)*yStep; v <= yMax+0.01; v += yStep) yTicks.push(+v.toFixed(2))
 
   return (
     <svg viewBox={`0 0 ${VW} ${VH}`} width="100%" height="100%"
-      style={{display:'block',background:'#16202e',borderRadius:'4px',userSelect:'none'}}>
+      style={{ display:'block', background: C.bg, borderRadius:'6px',
+        border:'1px solid #ccd4e4', userSelect:'none',
+        boxShadow:'0 2px 12px rgba(40,60,100,0.10)' }}>
       <defs>
-        <pattern id="grid-sm" width="1" height="1" patternUnits="userSpaceOnUse"
-          patternTransform={`scale(${W/(xMax-xMin)},${H/(yMax-yMin)}) translate(${-xMin},${-yMin})`}>
-          <path d="M 1 0 L 0 0 0 1" fill="none" stroke="#ffffff07" strokeWidth={0.02}/>
+        {/* 그리드 패턴 */}
+        <pattern id="pg-sm" patternUnits="userSpaceOnUse" width={xStep*pxPerM} height={yStep*(H/(yMax-yMin))}>
+          <path d={`M ${xStep*pxPerM} 0 L 0 0 0 ${yStep*(H/(yMax-yMin))}`}
+            fill="none" stroke={C.grid} strokeWidth="0.7"/>
         </pattern>
-        <linearGradient id="col-grad" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#2a5fa8"/><stop offset="100%" stopColor="#3a7ac8"/>
-        </linearGradient>
-        <linearGradient id="cop-grad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#3a7ac8"/><stop offset="100%" stopColor="#2a5fa8"/>
-        </linearGradient>
-        <filter id="glow">
-          <feGaussianBlur stdDeviation="3" result="blur"/>
-          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-        </filter>
-        <marker id="arr-load" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto">
-          <polygon points="0,0 7,3.5 0,7" fill="#f0a020"/>
+        {/* 화살표 마커 */}
+        <marker id="arr-load" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+          <polygon points="0,0 8,4 0,8" fill={C.loadArr}/>
         </marker>
-        <marker id="arr-rxn" markerWidth="7" markerHeight="7" refX="2" refY="3.5" orient="auto">
-          <polygon points="7,0 0,3.5 7,7" fill="#54d98c"/>
+        <marker id="arr-rxn" markerWidth="8" markerHeight="8" refX="2" refY="4" orient="auto">
+          <polygon points="8,0 0,4 8,8" fill={C.rxnArr}/>
         </marker>
-        <marker id="arr-dim" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
-          <line x1="0" y1="0" x2="6" y2="6" stroke="#667799" strokeWidth="1.2"/>
-          <line x1="0" y1="6" x2="6" y2="0" stroke="#667799" strokeWidth="1.2"/>
+        <marker id="arr-dim-e" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+          <line x1="0" y1="6" x2="6" y2="0" stroke={C.dimLine} strokeWidth="1.2"/>
+        </marker>
+        <marker id="arr-dim-s" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto-start-reverse">
+          <line x1="0" y1="6" x2="6" y2="0" stroke={C.dimLine} strokeWidth="1.2"/>
         </marker>
       </defs>
 
       {/* 배경 */}
-      <rect x={PAD.l} y={PAD.t} width={W} height={H} fill="#16202e"/>
-      <rect x={PAD.l} y={PAD.t} width={W} height={H} fill="url(#grid-sm)" opacity="0.6"/>
+      <rect width={VW} height={VH} fill={C.bg}/>
+      <rect x={PAD.l} y={PAD.t} width={W} height={H} fill={C.bgPanel}/>
+      <rect x={PAD.l} y={PAD.t} width={W} height={H} fill="url(#pg-sm)" opacity="0.9"/>
 
-      {/* 축 */}
-      <line x1={PAD.l} y1={PAD.t} x2={PAD.l} y2={PAD.t+H} stroke="#334455" strokeWidth="1"/>
-      <line x1={PAD.l} y1={PAD.t+H} x2={PAD.l+W} y2={PAD.t+H} stroke="#334455" strokeWidth="1"/>
+      {/* 테두리 */}
+      <rect x={PAD.l} y={PAD.t} width={W} height={H}
+        fill="none" stroke={C.gridMaj} strokeWidth="1"/>
 
-      {/* x 눈금 */}
-      {xTicks.map(v=>(
+      {/* 축 눈금 + 격자선 */}
+      {xTicks.map(v => (
         <g key={`xt-${v}`}>
-          <line x1={sx(v)} y1={PAD.t+H} x2={sx(v)} y2={PAD.t+H+4} stroke="#445566" strokeWidth="1"/>
-          <text x={sx(v)} y={PAD.t+H+14} textAnchor="middle" fill="#556677" fontSize="9" fontFamily="JetBrains Mono,monospace">{v}</text>
-          <line x1={sx(v)} y1={PAD.t} x2={sx(v)} y2={PAD.t+H} stroke="#ffffff05" strokeWidth="0.5"/>
+          <line x1={sx(v)} y1={PAD.t+H} x2={sx(v)} y2={PAD.t+H+4} stroke={C.axis} strokeWidth="1"/>
+          <line x1={sx(v)} y1={PAD.t} x2={sx(v)} y2={PAD.t+H} stroke={C.gridMaj} strokeWidth="0.6"/>
+          <text x={sx(v)} y={PAD.t+H+14} textAnchor="middle"
+            fill={C.axis} fontSize="9" fontFamily="JetBrains Mono,monospace">{v}</text>
         </g>
       ))}
-      {/* y 눈금 */}
-      {yTicks.map(v=>(
+      {yTicks.map(v => (
         <g key={`yt-${v}`}>
-          <line x1={PAD.l-4} y1={sy(v)} x2={PAD.l} y2={sy(v)} stroke="#445566" strokeWidth="1"/>
-          <text x={PAD.l-8} y={sy(v)+4} textAnchor="end" fill="#556677" fontSize="9" fontFamily="JetBrains Mono,monospace">{v}</text>
-          <line x1={PAD.l} y1={sy(v)} x2={PAD.l+W} y2={sy(v)} stroke="#ffffff05" strokeWidth="0.5"/>
+          <line x1={PAD.l-4} y1={sy(v)} x2={PAD.l} y2={sy(v)} stroke={C.axis} strokeWidth="1"/>
+          <line x1={PAD.l} y1={sy(v)} x2={PAD.l+W} y2={sy(v)} stroke={C.gridMaj} strokeWidth="0.6"/>
+          <text x={PAD.l-7} y={sy(v)+4} textAnchor="end"
+            fill={C.axis} fontSize="9" fontFamily="JetBrains Mono,monospace">{v}</text>
         </g>
       ))}
-      {/* 축 라벨 */}
-      <text x={PAD.l+W/2} y={VH-6} textAnchor="middle" fill="#445566" fontSize="9" fontFamily="JetBrains Mono,monospace">x (m)</text>
-      <text x={10} y={PAD.t+H/2} textAnchor="middle" fill="#445566" fontSize="9" fontFamily="JetBrains Mono,monospace"
+      <text x={PAD.l+W/2} y={VH-6} textAnchor="middle"
+        fill={C.axis} fontSize="9" fontFamily="JetBrains Mono,monospace">x (m)</text>
+      <text x={10} y={PAD.t+H/2} textAnchor="middle" fill={C.axis} fontSize="9"
+        fontFamily="JetBrains Mono,monospace"
         transform={`rotate(-90,10,${PAD.t+H/2})`}>y (m)</text>
 
       {/* 지반선 */}
-      <line x1={PAD.l} y1={sy(0)} x2={PAD.l+W} y2={sy(0)} stroke="#3a5a80" strokeWidth="1.5" strokeDasharray="8,4"/>
-      {Array.from({length:Math.floor(W/20)+1},(_,i)=>(
-        <line key={i} x1={PAD.l+i*20} y1={sy(0)} x2={PAD.l+i*20-8} y2={sy(0)+11}
-          stroke="#2a4a6a" strokeWidth="1"/>
+      <line x1={PAD.l} y1={sy(0)} x2={PAD.l+W} y2={sy(0)}
+        stroke={C.gl} strokeWidth="1.5" strokeDasharray="10,5"/>
+      {Array.from({ length: Math.floor(W/18)+1 }, (_, i) => (
+        <line key={i} x1={PAD.l+i*18} y1={sy(0)}
+          x2={PAD.l+i*18-7} y2={sy(0)+10}
+          stroke={C.gl} strokeWidth="1" opacity="0.6"/>
       ))}
-      <text x={PAD.l+8} y={sy(0)-4} fill="#3a5a80" fontSize="8" fontFamily="JetBrains Mono,monospace">GL ±0.000</text>
+      <text x={PAD.l+6} y={sy(0)-5}
+        fill={C.gl} fontSize="8" fontFamily="JetBrains Mono,monospace">G.L ±0.000</text>
 
       {/* BMD */}
-      {showBMD&&result&&members.map(m=>{
-        const mf=result.memberForces.find(f=>f.memberId===m.id)
-        const ni=nodeMap.get(m.ni),nj=nodeMap.get(m.nj)
-        if(!mf||!ni||!nj) return null
+      {showBMD && result && members.map(m => {
+        const path = bmdPath(m)
+        if (!path) return null
+        const mf = mfArr.find(f => f.memberId === m.id)!
+        const ni = nodeMap.get(m.ni)!, nj = nodeMap.get(m.nj)!
+        const dx = nj.x-ni.x, dy = nj.y-ni.y
+        const L  = Math.sqrt(dx*dx+dy*dy)
+        const nx = -dy/L, ny = dx/L
         return (
           <g key={`bmd-${m.id}`}>
-            <path d={bmdPath(m,ni,nj,mf)} fill="rgba(80,140,255,0.15)" stroke="#5080ff" strokeWidth="1.2"/>
-            {/* 최대 모멘트 값 표기 */}
-            {[{t:0,M:mf.Mi},{t:1,M:-mf.Mj}].map(({t,M},vi)=>{
-              if(Math.abs(M)<1) return null
-              const L=Math.sqrt((nj.x-ni.x)**2+(nj.y-ni.y)**2)
-              const nx2=-(nj.y-ni.y)/L,ny2=(nj.x-ni.x)/L
-              const px=ni.x+t*(nj.x-ni.x)+M*bmdScale*nx2
-              const py=ni.y+t*(nj.y-ni.y)+M*bmdScale*ny2
-              return (
-                <text key={vi} x={sx(px)+(m.type==='column'?6:0)} y={sy(py)+(m.type==='coping'?-6:0)}
-                  fill="#6090ff" fontSize="9" fontFamily="JetBrains Mono,monospace" fontWeight="700">
-                  {Math.abs(M).toFixed(0)}
-                </text>
-              )
-            })}
+            <path d={path} fill={C.bmdFill} stroke={C.bmd} strokeWidth="1.3"/>
+            {/* Mi 값 */}
+            {Math.abs(mf.Mi) > 1 && (() => {
+              const px = ni.x + mf.Mi * bmdScale * nx
+              const py = ni.y + mf.Mi * bmdScale * ny
+              return <text x={sx(px)+(m.type==='column'?5:-5)} y={sy(py)+(m.type==='coping'?-5:0)}
+                textAnchor={m.type==='column'?'start':'end'}
+                fill={C.bmd} fontSize="9" fontFamily="JetBrains Mono,monospace" fontWeight="700">
+                {Math.abs(mf.Mi).toFixed(0)}
+              </text>
+            })()}
+            {/* Mj 값 */}
+            {Math.abs(mf.Mj) > 1 && (() => {
+              const px = nj.x + mf.Mj * bmdScale * nx
+              const py = nj.y + mf.Mj * bmdScale * ny
+              return <text x={sx(px)+(m.type==='column'?5:-5)} y={sy(py)+(m.type==='coping'?-5:4)}
+                textAnchor={m.type==='column'?'start':'end'}
+                fill={C.bmd} fontSize="9" fontFamily="JetBrains Mono,monospace" fontWeight="700">
+                {Math.abs(mf.Mj).toFixed(0)}
+              </text>
+            })()}
           </g>
         )
       })}
 
       {/* 변형 형상 */}
-      {showDeformed&&result&&members.map(m=>{
-        const ni=nodeMap.get(m.ni)!,nj=nodeMap.get(m.nj)!
-        const nii=nodes.findIndex(n=>n.id===m.ni),nij=nodes.findIndex(n=>n.id===m.nj)
-        const dxi=result.U[nii*3]*defScale,dyi=result.U[nii*3+1]*defScale
-        const dxj=result.U[nij*3]*defScale,dyj=result.U[nij*3+1]*defScale
+      {showDeformed && result && members.map(m => {
+        const ni_i = nodes.findIndex(n => n.id === m.ni)
+        const nj_i = nodes.findIndex(n => n.id === m.nj)
+        const ni   = nodeMap.get(m.ni)!, nj = nodeMap.get(m.nj)!
+        const dxi  = result.U[ni_i*3]*defScale,  dyi = result.U[ni_i*3+1]*defScale
+        const dxj  = result.U[nj_i*3]*defScale,  dyj = result.U[nj_i*3+1]*defScale
         return (
           <line key={`def-${m.id}`}
             x1={sx(ni.x+dxi)} y1={sy(ni.y+dyi)}
             x2={sx(nj.x+dxj)} y2={sy(nj.y+dyj)}
-            stroke="#ffcc44" strokeWidth="1.8" strokeDasharray="6,3" opacity="0.75"/>
+            stroke={C.deformed} strokeWidth="1.8" strokeDasharray="5,3" opacity="0.85"/>
         )
       })}
 
-      {/* 기둥 단면 (직사각형) */}
-      {members.filter(m=>m.type==='column').map(m=>{
-        const ni=nodeMap.get(m.ni)!,nj=nodeMap.get(m.nj)!
+      {/* 기둥 단면 */}
+      {members.filter(m => m.type === 'column').map(m => {
+        const ni = nodeMap.get(m.ni)!, nj = nodeMap.get(m.nj)!
         return (
-          <rect key={`csec-${m.id}`}
-            x={sx(nj.x)-colPxW/2} y={sy(nj.y)}
-            width={colPxW} height={sy(ni.y)-sy(nj.y)}
-            fill="url(#col-grad)" stroke="#5090d0" strokeWidth="1.2" rx="1" opacity="0.88"/>
+          <rect key={`col-${m.id}`}
+            x={sx(nj.x) - colPxW/2} y={sy(nj.y)}
+            width={colPxW} height={sy(ni.y) - sy(nj.y)}
+            fill={C.column} stroke={C.colStroke} strokeWidth="1.2" rx="1" opacity="0.82"/>
         )
       })}
 
-      {/* 코핑 단면 */}
-      {members.filter(m=>m.type==='coping').map(m=>{
-        const ni=nodeMap.get(m.ni)!,nj=nodeMap.get(m.nj)!
-        const lx=Math.min(sx(ni.x),sx(nj.x))
-        const rx=Math.max(sx(ni.x),sx(nj.x))
-        // 코핑은 기둥 상단 절점 사이보다 좌우로 돌출
-        const overhang=(geom.colWidth/(xMax-xMin))*W
+      {/* 코핑 단면 — 전체 폭 직사각형 */}
+      {(() => {
+        const topNodes = members
+          .filter(m => m.type === 'coping')
+          .flatMap(m => [nodeMap.get(m.ni)!, nodeMap.get(m.nj)!])
+          .filter(Boolean)
+        if (topNodes.length === 0) {
+          // 1주 기둥: 단독 코핑
+          const topN = nodes.find(n => n.y === geom.colHeight && !n.isBearing)
+          if (!topN) return null
+          const cx = sx(topN.x)
+          const hw = (copingW / (xMax - xMin)) * W / 2
+          return (
+            <rect x={cx - hw} y={sy(copingTopY)}
+              width={hw*2} height={copPxH}
+              fill={C.coping} stroke={C.copStroke} strokeWidth="1.2" rx="1" opacity="0.82"/>
+          )
+        }
+        const xs = topNodes.map(n => sx(n.x))
+        const lx = Math.min(...xs) - colPxW/2
+        const rx = Math.max(...xs) + colPxW/2
         return (
-          <rect key={`cop-${m.id}`}
-            x={lx-overhang} y={sy(colHeight+copingDepth)}
-            width={rx-lx+overhang*2} height={copPxH}
-            fill="url(#cop-grad)" stroke="#5090d0" strokeWidth="1.2" rx="1" opacity="0.88"/>
-        )
-      })}
-      {/* 1주 기둥일 때 코핑 (별도 처리) */}
-      {geom.colCount===1&&(()=>{
-        const topNode=nodeMap.get(nodes.find(n=>n.y===colHeight)?.id??-1)
-        if(!topNode) return null
-        const cx=sx(topNode.x)
-        const copHalfW=(copingW/(xMax-xMin))*W/2
-        return (
-          <rect x={cx-copHalfW} y={sy(colHeight+copingDepth)}
-            width={copHalfW*2} height={copPxH}
-            fill="url(#cop-grad)" stroke="#5090d0" strokeWidth="1.2" rx="1" opacity="0.88"/>
+          <rect x={lx} y={sy(copingTopY)}
+            width={rx - lx} height={copPxH}
+            fill={C.coping} stroke={C.copStroke} strokeWidth="1.2" rx="1" opacity="0.82"/>
         )
       })()}
 
       {/* 부재 중심선 */}
-      {members.map(m=>{
-        const ni=nodeMap.get(m.ni)!,nj=nodeMap.get(m.nj)!
+      {members.map(m => {
+        const ni = nodeMap.get(m.ni)!, nj = nodeMap.get(m.nj)!
         return (
           <line key={`cl-${m.id}`}
             x1={sx(ni.x)} y1={sy(ni.y)} x2={sx(nj.x)} y2={sy(nj.y)}
-            stroke="#ffffff18" strokeWidth="1" strokeDasharray="3,4"/>
+            stroke={C.centerline} strokeWidth="0.8" strokeDasharray="3,4" opacity="0.7"/>
         )
       })}
 
-      {/* 받침 심볼 + 하중 화살표 */}
-      {bearingXs.map((bx,bi)=>{
-        const load=bearingLoads[bi]
-        if(!load) return null
-        const by=colHeight+copingDepth
-        const sbx=sx(bx),sby=sy(by)
-        const maxFy=Math.max(...bearingLoads.map(b=>b.Fy),1)
-        const arrowLen=30+Math.abs(load.Fy)/maxFy*35
-        const hLen=Math.min(Math.abs(load.Fx)/200*25+10,40)
+      {/* 하중 화살표 (받침 절점에서) */}
+      {bearingLoads.slice(0, geom.bearingCount).map((bl, bi) => {
+        const bnid = bearingNodeIds[bi]
+        const bn   = nodeMap.get(bnid)
+        if (!bn) return null
+        const bx = sx(bn.x), by = sy(bn.y)
+        const maxFy  = Math.max(...bearingLoads.map(b => b.Fy), 1)
+        const arrLen = 30 + Math.abs(bl.Fy) / maxFy * 40
+        const hLen   = Math.min(Math.abs(bl.Fx) / 200 * 28 + 10, 45)
         return (
-          <g key={`b-${bi}`}>
-            {/* 받침 박스 */}
-            <rect x={sbx-10} y={sby-14} width="20" height="14"
-              fill="#2a3850" stroke="#f0a020" strokeWidth="1.2" rx="1"/>
-            <line x1={sbx-10} y1={sby-7} x2={sbx+10} y2={sby-7}
-              stroke="#f0a02050" strokeWidth="0.8"/>
-            {/* 삼각형 */}
-            <polygon points={`${sbx},${sby} ${sbx-9},${sby+10} ${sbx+9},${sby+10}`}
-              fill="none" stroke="#f0a020" strokeWidth="1.2"/>
-            <line x1={sbx-12} y1={sby+10} x2={sbx+12} y2={sby+10}
-              stroke="#f0a020" strokeWidth="1.5"/>
+          <g key={`load-${bi}`}>
             {/* 수직 하중 */}
-            <line x1={sbx} y1={sby-14-arrowLen} x2={sbx} y2={sby-14}
-              stroke="#f0a020" strokeWidth="2" markerEnd="url(#arr-load)"/>
-            <text x={sbx+5} y={sby-14-arrowLen/2+4}
-              fill="#ffcc60" fontSize="10" fontFamily="JetBrains Mono,monospace" fontWeight="700">
-              {load.Fy}
+            <line x1={bx} y1={by - arrLen} x2={bx} y2={by - 6}
+              stroke={C.loadArr} strokeWidth="2" markerEnd="url(#arr-load)"/>
+            <text x={bx + 5} y={by - arrLen/2 + 3}
+              fill={C.loadTxt} fontSize="10" fontFamily="JetBrains Mono,monospace" fontWeight="700">
+              {bl.Fy}
             </text>
-            <text x={sbx+5} y={sby-14-arrowLen/2+14}
-              fill="#f0a02080" fontSize="8" fontFamily="JetBrains Mono,monospace">kN</text>
+            <text x={bx + 5} y={by - arrLen/2 + 13}
+              fill={C.loadTxt} fontSize="8" fontFamily="JetBrains Mono,monospace" opacity="0.7">
+              kN
+            </text>
             {/* 수평 하중 */}
-            {Math.abs(load.Fx)>0.1&&(
+            {Math.abs(bl.Fx) > 0.1 && (
               <>
                 <line
-                  x1={load.Fx>0?sbx-hLen:sbx+hLen} y1={sby-20}
-                  x2={sbx} y2={sby-20}
-                  stroke="#e07030" strokeWidth="1.8" markerEnd="url(#arr-load)"/>
-                <text x={load.Fx>0?sbx-hLen-2:sbx+hLen+2} y={sby-24}
-                  textAnchor={load.Fx>0?'end':'start'}
-                  fill="#e07030" fontSize="9" fontFamily="JetBrains Mono,monospace">
-                  {load.Fx}kN
+                  x1={bl.Fx > 0 ? bx - hLen : bx + hLen} y1={by - 18}
+                  x2={bx} y2={by - 18}
+                  stroke={C.loadArr} strokeWidth="1.6" markerEnd="url(#arr-load)"/>
+                <text
+                  x={bl.Fx > 0 ? bx - hLen - 3 : bx + hLen + 3}
+                  y={by - 22}
+                  textAnchor={bl.Fx > 0 ? 'end' : 'start'}
+                  fill={C.loadTxt} fontSize="8" fontFamily="JetBrains Mono,monospace">
+                  {bl.Fx}kN
                 </text>
               </>
             )}
-            {/* 받침 번호 */}
-            <text x={sbx} y={sby-2} textAnchor="middle"
-              fill="#f0a020" fontSize="8" fontFamily="JetBrains Mono,monospace" fontWeight="700">
-              BRG{bi+1}
-            </text>
           </g>
         )
       })}
 
       {/* 절점 */}
-      {nodes.map(n=>{
-        const isFixed=n.bc.some(Boolean)
+      {nodes.map(n => {
+        const isFixed   = n.bc.some(Boolean)
+        const isBearing = n.isBearing ?? false
+        const nx = sx(n.x), ny = sy(n.y)
+
+        if (isFixed) {
+          // 고정단 심볼
+          return (
+            <g key={`nd-${n.id}`}>
+              <rect x={nx-13} y={ny} width="26" height="10"
+                fill={C.fixedFill} stroke={C.fixedStr} strokeWidth="1.2" rx="1"/>
+              {Array.from({length:6},(_,i) => (
+                <line key={i}
+                  x1={nx-12+i*5} y1={ny+10}
+                  x2={nx-15+i*5} y2={ny+18}
+                  stroke={C.fixedStr} strokeWidth="1.1"/>
+              ))}
+              <text x={nx+16} y={ny-4}
+                fill={C.labelSub} fontSize="8" fontFamily="JetBrains Mono,monospace">N{n.id}</text>
+            </g>
+          )
+        }
+
+        if (isBearing) {
+          // 받침 절점 — 붉은 점
+          return (
+            <g key={`nd-${n.id}`}>
+              <circle cx={nx} cy={ny} r="7"
+                fill="#fff" stroke={C.bearing} strokeWidth="2"/>
+              <circle cx={nx} cy={ny} r="3.5"
+                fill={C.bearing}/>
+              <text x={nx} y={ny-12} textAnchor="middle"
+                fill={C.bearing} fontSize="8" fontFamily="JetBrains Mono,monospace" fontWeight="700">
+                BRG{(n.bearingIdx ?? 0)+1}
+              </text>
+            </g>
+          )
+        }
+
+        // 일반 자유 절점
         return (
           <g key={`nd-${n.id}`}>
-            {isFixed?(
-              <>
-                <rect x={sx(n.x)-12} y={sy(n.y)} width="24" height="10"
-                  fill="#1e3050" stroke="#4a6a9a" strokeWidth="1.2" rx="1"/>
-                {Array.from({length:5},(_,i)=>(
-                  <line key={i} x1={sx(n.x)-10+i*5} y1={sy(n.y)+10}
-                    x2={sx(n.x)-13+i*5} y2={sy(n.y)+18}
-                    stroke="#4a6a9a" strokeWidth="1.2"/>
-                ))}
-              </>
-            ):(
-              <circle cx={sx(n.x)} cy={sy(n.y)} r="5"
-                fill="#16202e" stroke="#60a0e0" strokeWidth="2"/>
-            )}
-            <text x={sx(n.x)+8} y={sy(n.y)-5}
-              fill="#5080a0" fontSize="8" fontFamily="JetBrains Mono,monospace">
-              N{n.id}
-            </text>
+            <circle cx={nx} cy={ny} r="5"
+              fill="#fff" stroke={C.nodeFree} strokeWidth="2"/>
+            <text x={nx+8} y={ny-5}
+              fill={C.labelSub} fontSize="8" fontFamily="JetBrains Mono,monospace">N{n.id}</text>
           </g>
         )
       })}
 
       {/* 반력 화살표 */}
-      {result&&result.reactions.map(r=>{
-        const n=nodeMap.get(r.nodeId)!
-        const scale=0.012
-        const ryLen=Math.min(Math.abs(r.Fy)*scale,45)+10
-        const rxLen=Math.min(Math.abs(r.Fx)*scale,30)+6
+      {result && result.reactions.map(r => {
+        const n  = nodeMap.get(r.nodeId)!
+        const nx = sx(n.x), ny = sy(n.y)
+        const sc = 0.014
+        const ryL = Math.min(Math.abs(r.Fy)*sc, 48)+10
+        const rxL = Math.min(Math.abs(r.Fx)*sc, 32)+6
         return (
           <g key={`rxn-${r.nodeId}`}>
-            {Math.abs(r.Fy)>5&&(
+            {Math.abs(r.Fy) > 5 && (
               <>
-                <line x1={sx(n.x)} y1={sy(n.y)+20} x2={sx(n.x)} y2={sy(n.y)+20+ryLen}
-                  stroke="#54d98c" strokeWidth="1.8" markerEnd="url(#arr-rxn)"/>
-                <text x={sx(n.x)+5} y={sy(n.y)+20+ryLen/2+4}
-                  fill="#54d98c" fontSize="9" fontFamily="JetBrains Mono,monospace">
+                <line x1={nx} y1={ny+20} x2={nx} y2={ny+20+ryL}
+                  stroke={C.rxnArr} strokeWidth="1.8" markerEnd="url(#arr-rxn)"/>
+                <text x={nx+5} y={ny+20+ryL/2+4}
+                  fill={C.rxnTxt} fontSize="9" fontFamily="JetBrains Mono,monospace" fontWeight="700">
                   {r.Fy.toFixed(0)}
                 </text>
               </>
             )}
-            {Math.abs(r.Fx)>5&&(
-              <line x1={sx(n.x)+(r.Fx>0?rxLen:-rxLen)} y1={sy(n.y)+14}
-                    x2={sx(n.x)} y2={sy(n.y)+14}
-                stroke="#54d98c" strokeWidth="1.5" markerEnd="url(#arr-rxn)"/>
+            {Math.abs(r.Fx) > 5 && (
+              <line
+                x1={nx+(r.Fx>0?rxL:-rxL)} y1={ny+14}
+                x2={nx} y2={ny+14}
+                stroke={C.rxnArr} strokeWidth="1.5" markerEnd="url(#arr-rxn)"/>
             )}
           </g>
         )
       })}
 
       {/* 치수선 — 기둥 높이 */}
-      {(()=>{
-        const lx=PAD.l+14
-        const y0=sy(0),y1=sy(colHeight)
+      {(() => {
+        const lx = PAD.l + 16
         return (
           <g>
-            <line x1={lx} y1={y0} x2={lx} y2={y1} stroke="#557799" strokeWidth="1"/>
-            <line x1={lx-4} y1={y0} x2={lx+4} y2={y0} stroke="#557799" strokeWidth="1"/>
-            <line x1={lx-4} y1={y1} x2={lx+4} y2={y1} stroke="#557799" strokeWidth="1"/>
-            <text x={lx-6} y={(y0+y1)/2+4} textAnchor="middle"
-              fill="#557799" fontSize="9" fontFamily="JetBrains Mono,monospace"
-              transform={`rotate(-90,${lx-6},${(y0+y1)/2})`}>
-              H={colHeight}m
+            <line x1={lx} y1={sy(0)} x2={lx} y2={sy(geom.colHeight)}
+              stroke={C.dimLine} strokeWidth="1"
+              markerStart="url(#arr-dim-s)" markerEnd="url(#arr-dim-e)"/>
+            <text x={lx-8} y={(sy(0)+sy(geom.colHeight))/2+4}
+              textAnchor="middle" fill={C.dimLine} fontSize="9"
+              fontFamily="JetBrains Mono,monospace"
+              transform={`rotate(-90,${lx-8},${(sy(0)+sy(geom.colHeight))/2})`}>
+              H={geom.colHeight}m
             </text>
+            {/* 코핑 높이 */}
+            <line x1={lx} y1={sy(geom.colHeight)} x2={lx} y2={sy(copingTopY)}
+              stroke={C.dimLine} strokeWidth="0.8"
+              markerStart="url(#arr-dim-s)" markerEnd="url(#arr-dim-e)"/>
           </g>
         )
       })()}
 
       {/* 부재 라벨 */}
-      {members.map((m,idx)=>{
-        const ni=nodeMap.get(m.ni)!,nj=nodeMap.get(m.nj)!
-        const mx=(ni.x+nj.x)/2,my=(ni.y+nj.y)/2
-        const isCop=m.type==='coping'
+      {members.map((m, idx) => {
+        const ni = nodeMap.get(m.ni)!, nj = nodeMap.get(m.nj)!
+        const mx = (ni.x+nj.x)/2, my = (ni.y+nj.y)/2
+        const isCop = m.type === 'coping'
         return (
           <text key={`ml-${m.id}`}
-            x={sx(mx)+(isCop?0:colPxW/2+4)} y={sy(my)+(isCop?-copPxH/2-6:0)}
-            fill="#3a6a9a" fontSize="9" fontFamily="JetBrains Mono,monospace" fontWeight="700">
-            {isCop?`COP-${idx}`:`COL-${idx+1}`}
+            x={sx(mx)+(isCop?0:colPxW/2+5)} y={sy(my)+(isCop?-copPxH/2-5:0)}
+            fill={C.label} fontSize="9" fontFamily="JetBrains Mono,monospace" fontWeight="700" opacity="0.75">
+            {isCop ? `COP-${idx}` : `COL-${idx+1}`}
           </text>
         )
       })}
 
       {/* 타이틀 */}
-      <text x={PAD.l} y={PAD.t-10} fill="#3a5a7a" fontSize="11" fontFamily="JetBrains Mono,monospace" fontWeight="700">
+      <text x={PAD.l} y={PAD.t-22}
+        fill={C.title} fontSize="12" fontFamily="JetBrains Mono,monospace" fontWeight="700"
+        letterSpacing="0.06em">
         2D PIER FRAME  ·  DSM
       </text>
-      {showBMD&&<text x={PAD.l+W-4} y={PAD.t-10} textAnchor="end"
-        fill="#5080ff" fontSize="9" fontFamily="JetBrains Mono,monospace">BMD</text>}
-      {showDeformed&&<text x={PAD.l+W-44} y={PAD.t-10} textAnchor="end"
-        fill="#ffcc44" fontSize="9" fontFamily="JetBrains Mono,monospace">DEFORMED</text>}
+      <text x={PAD.l} y={PAD.t-8}
+        fill={C.labelSub} fontSize="9" fontFamily="JetBrains Mono,monospace">
+        {nodes.length} nodes  ·  {members.length} members  ·  {nodes.length*3} DOF  ·  KDS 24 14 21
+      </text>
+
+      {/* 범례 */}
+      {showBMD && (
+        <g transform={`translate(${PAD.l+W-120},${PAD.t+8})`}>
+          <rect x="0" y="0" width="116" height="18" fill="rgba(255,255,255,0.8)" rx="2"
+            stroke={C.gridMaj} strokeWidth="0.8"/>
+          <line x1="6" y1="9" x2="22" y2="9" stroke={C.bmd} strokeWidth="1.5"/>
+          <rect x="6" y="5" width="16" height="8" fill={C.bmdFill} stroke={C.bmd} strokeWidth="0.8"/>
+          <text x="26" y="13" fill={C.bmd} fontSize="9" fontFamily="JetBrains Mono,monospace">BMD  (kN·m)</text>
+        </g>
+      )}
+      {showDeformed && (
+        <g transform={`translate(${PAD.l+W-120},${PAD.t+(showBMD?30:8)})`}>
+          <rect x="0" y="0" width="116" height="18" fill="rgba(255,255,255,0.8)" rx="2"
+            stroke={C.gridMaj} strokeWidth="0.8"/>
+          <line x1="6" y1="9" x2="22" y2="9" stroke={C.deformed} strokeWidth="1.8" strokeDasharray="4,2"/>
+          <text x="26" y="13" fill={C.deformed} fontSize="9" fontFamily="JetBrains Mono,monospace">DEFORMED</text>
+        </g>
+      )}
     </svg>
   )
 }
 
-// ── 결과 테이블 ──────────────────────────────────────────────────
-function ResultSection({result,members}:{result:AnalysisResult;members:Member[]}) {
-  const [tab,setTab]=useState<'member'|'reaction'>('member')
-  const tb=(a:boolean):React.CSSProperties=>({
-    border:'none',padding:'0.22rem 0.75rem',fontSize:'0.65rem',fontWeight:700,
-    fontFamily:'var(--font-mono)',cursor:'pointer',
-    background:a?'var(--primary)':'var(--surface-3)',color:a?'#fff':'var(--text-3)',
+// ────────────────────────────────────────────────────────────────
+//  결과 테이블
+// ────────────────────────────────────────────────────────────────
+function ResultSection({ result, members }: { result: AnalysisResult; members: Member[] }) {
+  const [tab, setTab] = useState<'member'|'reaction'>('member')
+  const tb = (a: boolean): React.CSSProperties => ({
+    border:'none', padding:'0.22rem 0.75rem',
+    fontSize:'0.65rem', fontWeight:700, fontFamily:'var(--font-mono)', cursor:'pointer',
+    background: a ? '#1a4e80' : '#e8eef6', color: a ? '#fff' : '#3a5a8a',
     borderRadius:'2px 2px 0 0',
   })
+  const th: React.CSSProperties = {
+    padding:'0.25rem 0.45rem', borderBottom:'2px solid #b0c0da',
+    color:'#2a3a5a', fontWeight:700, background:'#edf1f8', fontFamily:'var(--font-mono)',
+    fontSize:'0.67rem', whiteSpace:'nowrap',
+  }
   return (
-    <div style={{display:'flex',flexDirection:'column',height:'100%',overflow:'hidden'}}>
-      <div style={{display:'flex',gap:'2px',padding:'0.3rem 0.4rem 0',
-        background:'var(--surface-2)',borderBottom:'1px solid var(--border-dark)'}}>
+    <div style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden' }}>
+      <div style={{ display:'flex', gap:'2px', padding:'0.3rem 0.4rem 0',
+        background:'#f0f4fa', borderBottom:'1px solid #c8d4e8' }}>
         <button style={tb(tab==='member')} onClick={()=>setTab('member')}>부재력</button>
         <button style={tb(tab==='reaction')} onClick={()=>setTab('reaction')}>반력</button>
       </div>
-      <div style={{flex:1,overflowY:'auto',padding:'0.4rem'}}>
-        {tab==='member'&&(
-          <table style={{width:'100%',borderCollapse:'collapse',fontSize:'0.68rem',fontFamily:'var(--font-mono)'}}>
+      <div style={{ flex:1, overflowY:'auto', padding:'0.4rem', background:'#fff' }}>
+        {tab === 'member' && (
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.68rem', fontFamily:'var(--font-mono)' }}>
             <thead>
-              <tr style={{background:'var(--surface-3)'}}>
-                {['부재','유형','Ni(kN)','Vi(kN)','Mi(kN·m)','Nj(kN)','Vj(kN)','Mj(kN·m)'].map(h=>(
-                  <th key={h} style={{padding:'0.25rem 0.4rem',borderBottom:'2px solid var(--border-dark)',
-                    color:'var(--text-2)',fontWeight:700,textAlign:h==='부재'||h==='유형'?'left':'right',whiteSpace:'nowrap'}}>
-                    {h}
-                  </th>
+              <tr>
+                {['부재','유형','Ni(kN)','Vi(kN)','Mi(kN·m)','Nj(kN)','Vj(kN)','Mj(kN·m)'].map((h,hi) => (
+                  <th key={h} style={{ ...th, textAlign: hi<2?'left':'right' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {result.memberForces.map((mf,i)=>{
-                const mem=members.find(m=>m.id===mf.memberId)
-                const isCop=mem?.type==='coping'
-                const maxM=Math.max(Math.abs(mf.Mi),Math.abs(mf.Mj))
+              {result.memberForces.map((mf, i) => {
+                const mem = members.find(m => m.id === mf.memberId)
+                const isCop = mem?.type === 'coping'
+                const maxM  = Math.max(Math.abs(mf.Mi), Math.abs(mf.Mj))
                 return (
-                  <tr key={mf.memberId} style={{background:i%2===0?'var(--surface)':'var(--surface-2)'}}>
-                    <td style={{padding:'0.22rem 0.4rem',fontWeight:700,color:'var(--text-2)'}}>
-                      {isCop?`COP-${i}`:`COL-${i+1}`}
+                  <tr key={mf.memberId} style={{ background: i%2===0?'#fff':'#f5f7fc' }}>
+                    <td style={{ padding:'0.22rem 0.45rem', fontWeight:700, color:'#2a3a5a' }}>
+                      {isCop ? `COP-${i}` : `COL-${i+1}`}
                     </td>
-                    <td style={{padding:'0.22rem 0.4rem'}}>
-                      <span style={{fontSize:'0.6rem',padding:'0.05rem 0.35rem',borderRadius:'2px',fontWeight:700,
-                        background:isCop?'var(--primary-bg)':'var(--surface-3)',
-                        color:isCop?'var(--primary)':'var(--text-3)'}}>
-                        {isCop?'COPING':'COLUMN'}
+                    <td style={{ padding:'0.22rem 0.45rem' }}>
+                      <span style={{ fontSize:'0.6rem', padding:'0.05rem 0.35rem', borderRadius:'2px',
+                        fontWeight:700, background: isCop?'#deeaf8':'#e8f0f8',
+                        color: isCop?'#1a5a90':'#3a6a9a' }}>
+                        {isCop ? 'COPING' : 'COLUMN'}
                       </span>
                     </td>
-                    {[mf.Ni,mf.Vi,mf.Mi,mf.Nj,mf.Vj,mf.Mj].map((v,vi)=>(
-                      <td key={vi} style={{padding:'0.22rem 0.4rem',textAlign:'right',
-                        color:vi===2||vi===5
-                          ?maxM>3000?'var(--danger)':maxM>1500?'var(--warning)':'var(--success)'
-                          :'var(--text)'}}>
-                        {isFinite(v)?v.toFixed(1):'—'}
+                    {[mf.Ni,mf.Vi,mf.Mi,mf.Nj,mf.Vj,mf.Mj].map((v, vi) => (
+                      <td key={vi} style={{ padding:'0.22rem 0.45rem', textAlign:'right',
+                        fontWeight: vi===2||vi===5 ? 700 : 400,
+                        color: vi===2||vi===5
+                          ? maxM>3000?'#c01010':maxM>1500?'#c07010':'#1a7a30'
+                          : '#2a3a5a' }}>
+                        {isFinite(v) ? v.toFixed(1) : '—'}
                       </td>
                     ))}
                   </tr>
@@ -720,32 +863,37 @@ function ResultSection({result,members}:{result:AnalysisResult;members:Member[]}
             </tbody>
           </table>
         )}
-        {tab==='reaction'&&(
-          <table style={{width:'100%',borderCollapse:'collapse',fontSize:'0.68rem',fontFamily:'var(--font-mono)'}}>
+        {tab === 'reaction' && (
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.68rem', fontFamily:'var(--font-mono)' }}>
             <thead>
-              <tr style={{background:'var(--surface-3)'}}>
-                {['절점','Rx(kN)','Ry(kN)','Rm(kN·m)'].map(h=>(
-                  <th key={h} style={{padding:'0.25rem 0.5rem',borderBottom:'2px solid var(--border-dark)',
-                    color:'var(--text-2)',fontWeight:700,textAlign:h==='절점'?'left':'right'}}>
-                    {h}
-                  </th>
+              <tr>
+                {['절점','Rx(kN)','Ry(kN)','Rm(kN·m)'].map((h,hi) => (
+                  <th key={h} style={{ ...th, textAlign: hi===0?'left':'right' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {result.reactions.map((r,i)=>(
-                <tr key={r.nodeId} style={{background:i%2===0?'var(--surface)':'var(--surface-2)'}}>
-                  <td style={{padding:'0.22rem 0.5rem',fontWeight:700,color:'var(--text-2)'}}>N{r.nodeId}</td>
-                  <td style={{padding:'0.22rem 0.5rem',textAlign:'right',color:Math.abs(r.Fx)>5?'var(--warning)':'var(--text-3)'}}>{r.Fx.toFixed(1)}</td>
-                  <td style={{padding:'0.22rem 0.5rem',textAlign:'right',color:'var(--text)'}}>{r.Fy.toFixed(1)}</td>
-                  <td style={{padding:'0.22rem 0.5rem',textAlign:'right',color:Math.abs(r.Mz)>5?'var(--primary)':'var(--text-3)'}}>{r.Mz.toFixed(1)}</td>
+              {result.reactions.map((r, i) => (
+                <tr key={r.nodeId} style={{ background: i%2===0?'#fff':'#f5f7fc' }}>
+                  <td style={{ padding:'0.22rem 0.5rem', fontWeight:700, color:'#2a3a5a' }}>N{r.nodeId}</td>
+                  <td style={{ padding:'0.22rem 0.5rem', textAlign:'right',
+                    color: Math.abs(r.Fx)>5?'#c07010':'#8899bb' }}>{r.Fx.toFixed(1)}</td>
+                  <td style={{ padding:'0.22rem 0.5rem', textAlign:'right', color:'#2a3a5a', fontWeight:600 }}>{r.Fy.toFixed(1)}</td>
+                  <td style={{ padding:'0.22rem 0.5rem', textAlign:'right',
+                    color: Math.abs(r.Mz)>5?'#1a5a90':'#8899bb' }}>{r.Mz.toFixed(1)}</td>
                 </tr>
               ))}
-              <tr style={{background:'var(--surface-3)',borderTop:'2px solid var(--border-dark)'}}>
-                <td style={{padding:'0.22rem 0.5rem',fontWeight:700,color:'var(--text-2)'}}>Σ</td>
-                <td style={{padding:'0.22rem 0.5rem',textAlign:'right',fontWeight:700}}>{result.reactions.reduce((s,r)=>s+r.Fx,0).toFixed(1)}</td>
-                <td style={{padding:'0.22rem 0.5rem',textAlign:'right',fontWeight:700}}>{result.reactions.reduce((s,r)=>s+r.Fy,0).toFixed(1)}</td>
-                <td style={{padding:'0.22rem 0.5rem',textAlign:'right',fontWeight:700}}>{result.reactions.reduce((s,r)=>s+r.Mz,0).toFixed(1)}</td>
+              <tr style={{ background:'#edf1f8', borderTop:'2px solid #b0c0da' }}>
+                <td style={{ padding:'0.22rem 0.5rem', fontWeight:700, color:'#1a2a4a' }}>Σ</td>
+                <td style={{ padding:'0.22rem 0.5rem', textAlign:'right', fontWeight:700, color:'#1a2a4a' }}>
+                  {result.reactions.reduce((s,r)=>s+r.Fx,0).toFixed(1)}
+                </td>
+                <td style={{ padding:'0.22rem 0.5rem', textAlign:'right', fontWeight:700, color:'#1a2a4a' }}>
+                  {result.reactions.reduce((s,r)=>s+r.Fy,0).toFixed(1)}
+                </td>
+                <td style={{ padding:'0.22rem 0.5rem', textAlign:'right', fontWeight:700, color:'#1a2a4a' }}>
+                  {result.reactions.reduce((s,r)=>s+r.Mz,0).toFixed(1)}
+                </td>
               </tr>
             </tbody>
           </table>
@@ -755,92 +903,133 @@ function ResultSection({result,members}:{result:AnalysisResult;members:Member[]}
   )
 }
 
-// ── 메인 패널 ────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────
+//  메인 패널
+// ────────────────────────────────────────────────────────────────
 export default function PierFramePanel() {
-  const [geom,setGeom]=useState<PierGeom>(DEFAULT_GEOM)
-  const [bearingLoads,setBearingLoads]=useState<BearingLoad[]>(DEFAULT_BEARING_LOADS)
-  const [showBMD,setShowBMD]=useState(true)
-  const [showDeformed,setShowDeformed]=useState(false)
-  const [activeView,setActiveView]=useState<'model'|'result'>('model')
+  const [geom, setGeom]               = useState<PierGeom>(DEFAULT_GEOM)
+  const [bearingLoads, setBearingLoads] = useState<BearingLoad[]>(DEFAULT_BEARING_LOADS)
+  const [showBMD, setShowBMD]         = useState(true)
+  const [showDeformed, setShowDeformed] = useState(false)
+  const [activeView, setActiveView]   = useState<'model'|'result'>('model')
 
-  const updG=(patch:Partial<PierGeom>)=>setGeom(g=>({...g,...patch}))
+  const updG = (patch: Partial<PierGeom>) => setGeom(g => ({ ...g, ...patch }))
 
-  const syncBearings=(count:number)=>{
-    setBearingLoads(prev=>{
-      const arr=[...prev]
-      while(arr.length<count) arr.push({id:arr.length+1,Fy:2000,Fx:60,Mz:0})
-      return arr.slice(0,count)
+  // 기둥 수 변경 시 받침 수 자동 동기화 (기둥수+1)
+  const setColCount = (n: number) => {
+    const newBc = n + 1
+    setBearingLoads(prev => {
+      const arr = [...prev]
+      while (arr.length < newBc) arr.push({ id: arr.length+1, Fy:2000, Fx:60, Mz:0 })
+      return arr.slice(0, newBc)
     })
-    updG({bearingCount:count})
+    updG({ colCount: n, bearingCount: newBc })
   }
 
-  const {nodes,members,pointLoads,copingW,bearingXs}=useMemo(
-    ()=>buildModel(geom,bearingLoads),[geom,bearingLoads])
+  const syncBearings = (count: number) => {
+    setBearingLoads(prev => {
+      const arr = [...prev]
+      while (arr.length < count) arr.push({ id: arr.length+1, Fy:2000, Fx:60, Mz:0 })
+      return arr.slice(0, count)
+    })
+    updG({ bearingCount: count })
+  }
 
-  const result=useMemo(()=>solveFrame(nodes,members,pointLoads),[nodes,members,pointLoads])
+  const { nodes, members, pointLoads, copingW, bearingXs, bearingNodeIds, copingTopY } =
+    useMemo(() => buildModel(geom, bearingLoads), [geom, bearingLoads])
 
-  const bv=(a:boolean):React.CSSProperties=>({
-    border:'none',padding:'0.18rem 0.55rem',fontSize:'0.62rem',fontWeight:700,
-    fontFamily:'var(--font-mono)',cursor:'pointer',borderRadius:'2px',
-    background:a?'var(--primary)':'var(--surface-3)',color:a?'#fff':'var(--text-3)',
+  const result = useMemo(
+    () => solveFrame(nodes, members, pointLoads),
+    [nodes, members, pointLoads]
+  )
+
+  // 버튼 스타일 — 입력 패널 (밝은 배경)
+  const bvLight = (a: boolean): React.CSSProperties => ({
+    flex:1, border:'1px solid #c0cce0', padding:'0.16rem 0', cursor:'pointer',
+    fontSize:'0.72rem', fontWeight:700, fontFamily:'var(--font-mono)', borderRadius:'2px',
+    background: a ? '#1a4e80' : '#f0f4fa',
+    color:      a ? '#fff'    : '#3a5a8a',
+  })
+  // 버튼 스타일 — 툴바 (밝은 배경)
+  const bvTool = (a: boolean): React.CSSProperties => ({
+    border:'1px solid #c0cce0', padding:'0.18rem 0.55rem', cursor:'pointer',
+    fontSize:'0.65rem', fontWeight:700, fontFamily:'var(--font-mono)', borderRadius:'3px',
+    background: a ? '#1a4e80' : '#eef2f8',
+    color:      a ? '#fff'    : '#3a5a8a',
   })
 
   return (
-    <div style={{display:'flex',flex:1,height:'100%',overflow:'hidden'}}>
+    <div style={{ display:'flex', flex:1, height:'100%', overflow:'hidden' }}>
 
-      {/* ══ 좌: 입력 ══ */}
-      <div style={{width:'clamp(215px,21%,270px)',flexShrink:0,display:'flex',flexDirection:'column',
-        borderRight:'1px solid var(--border-dark)',background:'var(--surface)',overflow:'hidden'}}>
-
-        <div style={{padding:'0.32rem 0.65rem',background:'var(--surface-3)',borderBottom:'1px solid var(--border-dark)',
-          display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-          <span style={{fontSize:'0.68rem',fontWeight:700,color:'var(--text-3)',
-            letterSpacing:'0.08em',textTransform:'uppercase',fontFamily:'var(--font-mono)'}}>Pier Model</span>
-          <span style={{fontSize:'0.58rem',color:'var(--primary)',fontFamily:'var(--font-mono)',
-            background:'var(--primary-bg)',border:'1px solid var(--primary-dim)',
-            borderRadius:'2px',padding:'0.05rem 0.35rem',fontWeight:700}}>DSM · 2D</span>
+      {/* ══ 좌: 입력 패널 ══ */}
+      <div style={{
+        width:'clamp(215px,21%,268px)', flexShrink:0,
+        display:'flex', flexDirection:'column',
+        borderRight:'1px solid #c8d4e8',
+        background:'#f8f9fc', overflow:'hidden',
+      }}>
+        {/* 헤더 */}
+        <div style={{ padding:'0.32rem 0.65rem', background:'#1a3a6a',
+          borderBottom:'1px solid #0f2a52',
+          display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <span style={{ fontSize:'0.68rem', fontWeight:700, color:'#c8daf0',
+            letterSpacing:'0.08em', textTransform:'uppercase', fontFamily:'var(--font-mono)' }}>
+            Pier Model
+          </span>
+          <span style={{ fontSize:'0.58rem', color:'#7aaad8', fontFamily:'var(--font-mono)',
+            background:'rgba(255,255,255,0.12)', borderRadius:'2px',
+            padding:'0.04rem 0.35rem', fontWeight:700 }}>
+            DSM · 2D
+          </span>
         </div>
 
-        <div style={{flex:1,overflowY:'auto'}}>
+        <div style={{ flex:1, overflowY:'auto' }}>
+
           <GH title="Pier Geometry" sub="교각 형상"/>
           <Row label="기둥 수">
-            <div style={{display:'flex',gap:'2px',padding:'0.1rem 0'}}>
-              {[1,2,3].map(n=>(
-                <button key={n} onClick={()=>updG({colCount:n})} style={{
-                  flex:1,border:'1px solid var(--border-dark)',padding:'0.15rem 0',
-                  fontSize:'0.72rem',fontWeight:700,fontFamily:'var(--font-mono)',cursor:'pointer',
-                  background:geom.colCount===n?'var(--primary)':'var(--surface-2)',
-                  color:geom.colCount===n?'#fff':'var(--text-3)',borderRadius:'2px'}}>
+            <div style={{ display:'flex', gap:'2px', padding:'0.1rem 0' }}>
+              {[1,2,3].map(n => (
+                <button key={n} onClick={() => setColCount(n)} style={bvLight(geom.colCount===n)}>
                   {n}주
                 </button>
               ))}
             </div>
           </Row>
-          {geom.colCount>1&&(
+          {geom.colCount > 1 && (
             <Row label="기둥 순간격(m)">
               <Num value={geom.colSpacing} min={1} step={0.5} onChange={v=>updG({colSpacing:v})}/>
             </Row>
           )}
-          <Row label="기둥 높이(m)"><Num value={geom.colHeight} min={1} step={0.5} onChange={v=>updG({colHeight:v})}/></Row>
+          <Row label="기둥 높이(m)">
+            <Num value={geom.colHeight} min={1} step={0.5} onChange={v=>updG({colHeight:v})}/>
+          </Row>
 
           <GH title="Section" sub="단면 (m)"/>
-          <Row label="기둥 폭(m)"><Num value={geom.colWidth} min={0.3} step={0.1} onChange={v=>updG({colWidth:v})}/></Row>
-          <Row label="기둥 깊이(m)"><Num value={geom.colDepth} min={0.3} step={0.1} onChange={v=>updG({colDepth:v})}/></Row>
-          <Row label="코핑 깊이(m)"><Num value={geom.copingDepth} min={0.5} step={0.1} onChange={v=>updG({copingDepth:v})}/></Row>
+          <Row label="기둥 폭(m)">
+            <Num value={geom.colWidth} min={0.3} step={0.1} onChange={v=>updG({colWidth:v})}/>
+          </Row>
+          <Row label="기둥 깊이(m)">
+            <Num value={geom.colDepth} min={0.3} step={0.1} onChange={v=>updG({colDepth:v})}/>
+          </Row>
+          <Row label="코핑 깊이(m)">
+            <Num value={geom.copingDepth} min={0.5} step={0.1} onChange={v=>updG({copingDepth:v})}/>
+          </Row>
 
           <GH title="Material" sub="KDS 24 14 21"/>
-          <Row label="fck (MPa)"><Num value={geom.fck} min={21} step={3} onChange={v=>updG({fck:v})}/></Row>
+          <Row label="fck (MPa)">
+            <Num value={geom.fck} min={21} step={3} onChange={v=>updG({fck:v})}/>
+          </Row>
           <Row label="Ec (MPa)">
-            <div style={{padding:'0.1rem 0.3rem',fontSize:'0.75rem',fontWeight:700,
-              fontFamily:'var(--font-mono)',color:'var(--primary)'}}>
+            <div style={{ padding:'0.1rem 0.3rem', fontSize:'0.75rem', fontWeight:700,
+              fontFamily:'var(--font-mono)', color:'#1a4e80' }}>
               {Math.round(Ec(geom.fck)).toLocaleString()}
             </div>
           </Row>
 
-          {/* 단면 특성 요약 */}
-          <div style={{padding:'0.22rem 0.5rem',background:'var(--surface-2)',
-            borderTop:'1px solid var(--border-light)',fontSize:'0.62rem',
-            fontFamily:'var(--font-mono)',color:'var(--text-3)',lineHeight:1.8}}>
+          {/* 단면 요약 */}
+          <div style={{ padding:'0.22rem 0.55rem', background:'#edf2fa',
+            borderTop:'1px solid #d0daea', fontSize:'0.62rem',
+            fontFamily:'var(--font-mono)', color:'#4a6a9a', lineHeight:1.8 }}>
             <div>A<sub>g</sub> = {(geom.colWidth*geom.colDepth*1e4).toFixed(0)} cm²</div>
             <div>I<sub>g</sub> = {(geom.colWidth*Math.pow(geom.colDepth,3)/12*1e8).toFixed(0)} cm⁴</div>
             <div>코핑 폭 = {copingW.toFixed(2)} m</div>
@@ -848,95 +1037,103 @@ export default function PierFramePanel() {
 
           <GH title="Bearing Loads" sub="받침 하중"/>
           <Row label="받침 수">
-            <div style={{display:'flex',gap:'2px',padding:'0.1rem 0'}}>
-              {[1,2,3,4].map(n=>(
-                <button key={n} onClick={()=>syncBearings(n)} style={{
-                  flex:1,border:'1px solid var(--border-dark)',padding:'0.15rem 0',
-                  fontSize:'0.72rem',fontWeight:700,fontFamily:'var(--font-mono)',cursor:'pointer',
-                  background:geom.bearingCount===n?'var(--primary)':'var(--surface-2)',
-                  color:geom.bearingCount===n?'#fff':'var(--text-3)',borderRadius:'2px'}}>
+            <div style={{ display:'flex', gap:'2px', padding:'0.1rem 0' }}>
+              {[1,2,3,4].map(n => (
+                <button key={n} onClick={() => syncBearings(n)} style={bvLight(geom.bearingCount===n)}>
                   {n}
                 </button>
               ))}
             </div>
           </Row>
 
-          {bearingLoads.slice(0,geom.bearingCount).map((bl,bi)=>(
+          {bearingLoads.slice(0, geom.bearingCount).map((bl, bi) => (
             <div key={bl.id}>
-              <div style={{padding:'0.16rem 0.55rem',background:'var(--primary-bg)',
-                borderBottom:'1px solid var(--primary-dim)',
-                fontSize:'0.62rem',fontWeight:700,color:'var(--primary)',fontFamily:'var(--font-mono)'}}>
-                BRG-{bi+1}  <span style={{color:'var(--text-disabled)',fontWeight:400,fontSize:'0.58rem'}}>x = {bearingXs[bi]?.toFixed(2)}m</span>
+              <div style={{ padding:'0.16rem 0.55rem', background:'#f0f5fc',
+                borderBottom:'1px solid #d0daea',
+                fontSize:'0.62rem', fontWeight:700, color:'#1a4070',
+                fontFamily:'var(--font-mono)', display:'flex', justifyContent:'space-between' }}>
+                <span>BRG-{bi+1}</span>
+                <span style={{ color:'#8899bb', fontWeight:400, fontSize:'0.58rem' }}>
+                  x = {bearingXs[bi]?.toFixed(2)}m
+                </span>
               </div>
               <Row label="Fy (kN)">
-                <Num value={bl.Fy} step={100} onChange={v=>setBearingLoads(prev=>{const a=[...prev];a[bi]={...a[bi],Fy:v};return a})}/>
+                <Num value={bl.Fy} step={100}
+                  onChange={v=>setBearingLoads(prev=>{const a=[...prev];a[bi]={...a[bi],Fy:v};return a})}/>
               </Row>
               <Row label="Fx (kN)">
-                <Num value={bl.Fx} step={10} onChange={v=>setBearingLoads(prev=>{const a=[...prev];a[bi]={...a[bi],Fx:v};return a})}/>
+                <Num value={bl.Fx} step={10}
+                  onChange={v=>setBearingLoads(prev=>{const a=[...prev];a[bi]={...a[bi],Fx:v};return a})}/>
               </Row>
               <Row label="Mz (kN·m)">
-                <Num value={bl.Mz} step={10} onChange={v=>setBearingLoads(prev=>{const a=[...prev];a[bi]={...a[bi],Mz:v};return a})}/>
+                <Num value={bl.Mz} step={10}
+                  onChange={v=>setBearingLoads(prev=>{const a=[...prev];a[bi]={...a[bi],Mz:v};return a})}/>
               </Row>
             </div>
           ))}
+
         </div>
       </div>
 
       {/* ══ 우: 뷰 영역 ══ */}
-      <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',background:'var(--bg)'}}>
+      <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', background:'#f4f6fa' }}>
 
         {/* 툴바 */}
-        <div style={{padding:'0.28rem 0.6rem',background:'var(--surface-2)',
-          borderBottom:'1px solid var(--border-dark)',display:'flex',alignItems:'center',gap:'0.35rem',flexShrink:0}}>
-          <span style={{fontSize:'0.6rem',color:'var(--text-3)',fontFamily:'var(--font-mono)',marginRight:'0.2rem'}}>VIEW</span>
-          <button style={bv(activeView==='model')} onClick={()=>setActiveView('model')}>모델</button>
-          <button style={bv(activeView==='result')} onClick={()=>setActiveView('result')}>결과표</button>
-          <div style={{width:'1px',height:'1rem',background:'var(--border-dark)',margin:'0 0.15rem'}}/>
-          <span style={{fontSize:'0.6rem',color:'var(--text-3)',fontFamily:'var(--font-mono)'}}>표시</span>
-          <button style={bv(showBMD)} onClick={()=>setShowBMD(v=>!v)}>BMD</button>
-          <button style={bv(showDeformed)} onClick={()=>setShowDeformed(v=>!v)}>변형</button>
-          <div style={{flex:1}}/>
-          <span style={{fontSize:'0.6rem',color:'var(--text-disabled)',fontFamily:'var(--font-mono)'}}>
-            {nodes.length}N · {members.length}M · {nodes.length*3}DOF
+        <div style={{ padding:'0.3rem 0.7rem', background:'#fff',
+          borderBottom:'1px solid #c8d4e8',
+          display:'flex', alignItems:'center', gap:'0.4rem', flexShrink:0,
+          boxShadow:'0 1px 4px rgba(40,60,100,0.07)' }}>
+          <span style={{ fontSize:'0.62rem', color:'#7a8aaa', fontFamily:'var(--font-mono)', marginRight:'0.2rem' }}>VIEW</span>
+          <button style={bvTool(activeView==='model')} onClick={()=>setActiveView('model')}>모델</button>
+          <button style={bvTool(activeView==='result')} onClick={()=>setActiveView('result')}>결과표</button>
+          <div style={{ width:'1px', height:'1rem', background:'#d0daea', margin:'0 0.15rem' }}/>
+          <span style={{ fontSize:'0.62rem', color:'#7a8aaa', fontFamily:'var(--font-mono)' }}>표시</span>
+          <button style={bvTool(showBMD)} onClick={()=>setShowBMD(v=>!v)}>BMD</button>
+          <button style={bvTool(showDeformed)} onClick={()=>setShowDeformed(v=>!v)}>변형</button>
+          <div style={{ flex:1 }}/>
+          <span style={{ fontSize:'0.6rem', color:'#9aaabb', fontFamily:'var(--font-mono)' }}>
+            {nodes.length}N · {members.length}M · {nodes.length*3} DOF
           </span>
         </div>
 
-        {activeView==='model'&&(
-          <div style={{flex:1,overflow:'hidden',padding:'0.5rem',display:'flex',flexDirection:'column',gap:'0.4rem'}}>
-            <div style={{flex:1,minHeight:0}}>
+        {activeView === 'model' && (
+          <div style={{ flex:1, overflow:'hidden', padding:'0.6rem', display:'flex', flexDirection:'column', gap:'0.45rem' }}>
+            <div style={{ flex:1, minHeight:0 }}>
               <ModelSVG
                 nodes={nodes} members={members} result={result}
-                colHeight={geom.colHeight} copingW={copingW} copingDepth={geom.copingDepth}
-                geom={geom} bearingLoads={bearingLoads} bearingXs={bearingXs}
+                geom={geom} copingW={copingW}
+                bearingLoads={bearingLoads} bearingXs={bearingXs}
+                bearingNodeIds={bearingNodeIds} copingTopY={copingTopY}
                 showBMD={showBMD} showDeformed={showDeformed}/>
             </div>
 
-            {/* Critical Forces 요약 */}
-            <div style={{background:'var(--surface)',border:'1px solid var(--border-dark)',
-              borderRadius:'3px',padding:'0.28rem 0.6rem',flexShrink:0}}>
-              <div style={{fontSize:'0.6rem',fontWeight:700,color:'var(--text-3)',
-                fontFamily:'var(--font-mono)',letterSpacing:'0.08em',marginBottom:'0.2rem'}}>
+            {/* Critical Forces */}
+            <div style={{ background:'#fff', border:'1px solid #c8d4e8', borderRadius:'4px',
+              padding:'0.3rem 0.65rem', flexShrink:0,
+              boxShadow:'0 1px 4px rgba(40,60,100,0.07)' }}>
+              <div style={{ fontSize:'0.6rem', fontWeight:700, color:'#8899bb',
+                fontFamily:'var(--font-mono)', letterSpacing:'0.08em', marginBottom:'0.22rem' }}>
                 CRITICAL FORCES
               </div>
-              <div style={{display:'flex',gap:'1.2rem',flexWrap:'wrap'}}>
-                {result.memberForces.map((mf,i)=>{
-                  const mem=members.find(m=>m.id===mf.memberId)
-                  const maxM=Math.max(Math.abs(mf.Mi),Math.abs(mf.Mj))
-                  const maxV=Math.max(Math.abs(mf.Vi),Math.abs(mf.Vj))
-                  const maxN=Math.max(Math.abs(mf.Ni),Math.abs(mf.Nj))
+              <div style={{ display:'flex', gap:'1.4rem', flexWrap:'wrap' }}>
+                {result.memberForces.map((mf, i) => {
+                  const mem  = members.find(m => m.id === mf.memberId)
+                  const maxM = Math.max(Math.abs(mf.Mi), Math.abs(mf.Mj))
+                  const maxV = Math.max(Math.abs(mf.Vi), Math.abs(mf.Vj))
+                  const maxN = Math.max(Math.abs(mf.Ni), Math.abs(mf.Nj))
                   return (
-                    <div key={mf.memberId} style={{display:'flex',gap:'0.5rem',alignItems:'baseline'}}>
-                      <span style={{fontSize:'0.6rem',fontWeight:700,color:'var(--text-3)',fontFamily:'var(--font-mono)'}}>
-                        {mem?.type==='coping'?`COP-${i}`:`COL-${i+1}`}
+                    <div key={mf.memberId} style={{ display:'flex', gap:'0.5rem', alignItems:'baseline' }}>
+                      <span style={{ fontSize:'0.62rem', fontWeight:700, color:'#7a8aaa', fontFamily:'var(--font-mono)' }}>
+                        {mem?.type==='coping' ? `COP-${i}` : `COL-${i+1}`}
                       </span>
-                      <span style={{fontSize:'0.7rem',fontWeight:700,color:'var(--primary)',fontFamily:'var(--font-mono)'}}>
-                        M={maxM.toFixed(0)}<span style={{fontSize:'0.57rem',color:'var(--text-disabled)'}}>kN·m</span>
+                      <span style={{ fontSize:'0.72rem', fontWeight:700, color:'#c04020', fontFamily:'var(--font-mono)' }}>
+                        M={maxM.toFixed(0)}<span style={{ fontSize:'0.57rem', color:'#aaa' }}>kN·m</span>
                       </span>
-                      <span style={{fontSize:'0.7rem',fontWeight:700,color:'var(--warning)',fontFamily:'var(--font-mono)'}}>
-                        V={maxV.toFixed(0)}<span style={{fontSize:'0.57rem',color:'var(--text-disabled)'}}>kN</span>
+                      <span style={{ fontSize:'0.7rem', fontWeight:700, color:'#c07010', fontFamily:'var(--font-mono)' }}>
+                        V={maxV.toFixed(0)}<span style={{ fontSize:'0.57rem', color:'#aaa' }}>kN</span>
                       </span>
-                      <span style={{fontSize:'0.67rem',color:'var(--text-3)',fontFamily:'var(--font-mono)'}}>
-                        N={maxN.toFixed(0)}<span style={{fontSize:'0.57rem',color:'var(--text-disabled)'}}>kN</span>
+                      <span style={{ fontSize:'0.67rem', color:'#7a9aba', fontFamily:'var(--font-mono)' }}>
+                        N={maxN.toFixed(0)}<span style={{ fontSize:'0.57rem', color:'#aaa' }}>kN</span>
                       </span>
                     </div>
                   )
@@ -946,8 +1143,8 @@ export default function PierFramePanel() {
           </div>
         )}
 
-        {activeView==='result'&&(
-          <div style={{flex:1,overflow:'hidden'}}>
+        {activeView === 'result' && (
+          <div style={{ flex:1, overflow:'hidden' }}>
             <ResultSection result={result} members={members}/>
           </div>
         )}
