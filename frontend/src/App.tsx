@@ -1,18 +1,16 @@
 import React, { useState } from 'react'
-import type { ModuleId, DesignCode } from './types'
+import type { ModuleId } from './types'
 import { useResponsive } from './hooks/useResponsive'
 import Sidebar from './components/layout/Sidebar'
 import Header from './components/layout/Header'
 import MobileNav from './components/layout/MobileNav'
 import SimpleBeamPanel from './components/modules/SimpleBeamPanel'
 import DeepBeamPanel from './components/modules/DeepBeamPanel'
-import SlabPanel from './components/modules/SlabPanel'
 import ColumnPanel from './components/modules/ColumnPanel'
 import WallPanel from './components/modules/WallPanel'
 import AbutmentPanel from './components/modules/AbutmentPanel'
 import FoundationPanel from './components/modules/FoundationPanel'
 
-// 각 패널을 항상 마운트하고 display로 show/hide → 상태 유지
 function ModulePanel({ id }: { id: ModuleId }) {
   const show = (mid: ModuleId) =>
     ({ display: id === mid ? 'flex' : 'none', flex: 1, overflow: 'hidden' } as React.CSSProperties)
@@ -20,8 +18,6 @@ function ModulePanel({ id }: { id: ModuleId }) {
     <>
       <div style={show('simple-beam')}><SimpleBeamPanel /></div>
       <div style={show('deep-beam')}><DeepBeamPanel /></div>
-      <div style={show('slab-one-way')}><SlabPanel moduleId="slab-one-way" /></div>
-      <div style={show('slab-two-way')}><SlabPanel moduleId="slab-two-way" /></div>
       <div style={show('rc-column')}><ColumnPanel /></div>
       <div style={show('rc-wall')}><WallPanel /></div>
       <div style={show('abutment')}><AbutmentPanel /></div>
@@ -32,7 +28,6 @@ function ModulePanel({ id }: { id: ModuleId }) {
 
 export default function App() {
   const [activeModule, setActiveModule] = useState<ModuleId>('simple-beam')
-  const [designCode, setDesignCode]     = useState<DesignCode>('KDS')
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const { isDesktop, isCompact } = useResponsive()
 
@@ -41,8 +36,6 @@ export default function App() {
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', maxWidth: 'var(--app-max-w)', background: 'var(--bg)', boxShadow: 'var(--app-shadow)' }}>
         <Header
           activeModule={activeModule}
-          designCode={designCode}
-          onToggleCode={() => setDesignCode(c => c === 'KDS' ? 'ACI' : 'KDS')}
           showMenuBtn={isCompact}
           onMenuOpen={() => setMobileNavOpen(true)}
         />
