@@ -1,806 +1,980 @@
+/**
+ * AbutmentPanel.tsx
+ * 교대 검토 (반중력식 / 역T형) + 기초 통합 검토
+ * 적용기준: KDS 14 20 00:2025, KDS 11 50 15, KDS 11 50 20
+ * 참고: 도로설계편람 교량편(국토교통부), 도로설계요령(2020) 제3권 교량
+ */
 import { useState, useCallback } from 'react'
 import type { CheckResult, CheckItem, CalcLine, CheckStatus } from '../../types'
 import { useResponsive } from '../../hooks/useResponsive'
 import ResultTable from '../common/ResultTable'
 
-// ── 상수 ────────────────────────────────────────────────────────
+// ── 상수 ─────────────────────────────────────────────────────────
 const REBAR_AREA: Record<number, number> = {
   10: 71.3, 13: 126.7, 16: 198.6, 19: 286.5,
   22: 387.1, 25: 506.7, 29: 642.4, 32: 794.2, 35: 956.6,
 }
 const REBAR_DIAS = [10, 13, 16, 19, 22, 25, 29, 32, 35]
 
-// ── 교대 타입 ────────────────────────────────────────────────────
-type AbutmentType = 'gravity' | 'inverted-t' | 'cantilever' | 'counterfort'
-type SoilType = 'sand' | 'sand-gravel' | 'clay' | 'rock'
+// ── 타입 정의 ─────────────────────────────────────────────────────
+type AbutType = 'semi-gravity' | 'inverted-t'
+type FoundType = 'spread' | 'pile'
+type PileType = 'PHC' | 'steel-pipe' | 'cast-in-place' | 'H-pile'
 
-interface AbutmentGeom {
-  type: AbutmentType
-  // 전면벽 (Stem)
-  stemHeight: number      // 전면벽 높이 (m)
-  stemThickTop: number    // 전면벽 상단 두께 (mm)
-  stemThickBot: number    // 전면벽 하단 두께 (mm)
-  // 흉벽 (Breast wall / Back wall)
-  backwallHeight: number  // 흉벽 높이 (m)
-  backwallThick: number   // 흉벽 두께 (mm)
-  // 기초판 (Footing)
-  footWidth: number       // 기초판 폭 (m)
-  footThick: number       // 기초판 두께 (mm)
-  footToe: number         // 앞굽 길이 (m)
-  footHeel: number        // 뒷굽 길이 (m)
-  // 날개벽 (Wing wall)
-  wingLength: number      // 날개벽 길이 (m)
-  wingThick: number       // 날개벽 두께 (mm)
-  // 공통
-  unitWidth: number       // 검토 단위 폭 (m), 통상 1.0
+// ─── 반중력식 교대 제원 ──────────────────────────────────────────
+// 도면 기준: 전면이 계단+경사, 후면 직선
+interface SemiGravityGeom {
+  // 상부 치수 (상단부터)
+  topWidth: number        // 교대 상단 전체폭 (m)  ex) 4.600
+  backwallH: number       // 흉벽 높이 (m)         ex) 1.500
+  backwallThick: number   // 흉벽 두께 (m)         ex) 0.400
+  bearingPadW: number     // 교좌 돌출 폭 (m)      ex) 0.550
+  // 줄기 (Stem) — 전면 경사+계단
+  stemH: number           // 줄기 높이 (m)         ex) 6.000
+  stemTopW: number        // 줄기 상단 두께 (m)    ex) 1.500(전면)+뒷면 직선
+  stemBotW: number        // 줄기 하단 두께 (m)    ex) 3.500
+  frontStepH: number      // 전면 계단 높이 (m)    ex) 1.000 (상단 수직부)
+  frontStepW: number      // 전면 계단 폭 (m)      ex) 0.400
+  // 기초판
+  footH: number           // 기초판 두께 (m)       ex) 1.000
+  footToe: number         // 앞굽 (m)              ex) 1.000
+  footHeel: number        // 뒷굽 (m)              ex) 1.800
+  footWidth: number       // 기초 전체폭 (m)       ex) 4.600
+  // 뒷면 돌출 (계단)
+  backStepH: number       // 뒷면 계단 높이 (m)    ex) 1.400
+  backStepW: number       // 뒷면 계단 폭 (m)      ex) 0.200
+  unitWidth: number       // 단위 폭 (m)
 }
 
-interface AbutmentMaterial {
-  fck: number             // 콘크리트 (MPa)
-  fy: number              // 철근 (MPa)
-  Es: number              // 철근 탄성계수 (MPa)
-  gammaConcrete: number   // 콘크리트 단위중량 (kN/m³)
+// ─── 역T형 교대 제원 ─────────────────────────────────────────────
+// 도면 기준: 줄기 직선, 기초판 역T, 말뚝기초
+interface InvertedTGeom {
+  // 흉벽
+  backwallH: number       // 흉벽 높이 (m)         ex) 0.880
+  backwallThick: number   // 흉벽 두께 (m)         ex) 0.500
+  // 교좌 블록
+  bearingH: number        // 교좌 블록 높이 (m)    ex) 0.300(포함됨)
+  bearingW: number        // 교좌 블록 폭 (m)      ex) 0.750
+  // 줄기 (Stem) — 양면 직선, 상단/하단 두께
+  stemH: number           // 줄기 높이 (m)         ex) 3.500
+  stemTopW: number        // 줄기 상단 두께 (m)    ex) 0.500
+  stemBotW: number        // 줄기 하단 두께 (m)    ex) 1.300 (기초 상면 폭)
+  // 기초 헌치 (줄기 하단 돌출)
+  haunchH: number         // 헌치 높이 (m)         ex) 1.000
+  haunchW: number         // 헌치 폭 (양쪽, m)     ex) 1.300
+  // 기초판
+  footH: number           // 기초판 두께 (m)       ex) 1.820
+  capH: number            // 기초 캡 두께 = footH  ex) 1.820
+  footToe: number         // 앞굽 (m)              ex) 0.750 (0.100+0.650)
+  footHeel: number        // 뒷굽 (m)              ex) 0.750 (0.650+0.100)
+  footWidth: number       // 기초 전체폭 (m)       ex) 5.900
+  sumpH: number           // 기초 하단 집수정 여유 (m) ex) 1.500 (기초 하부 돌출)
+  unitWidth: number       // 단위 폭 (m)
 }
 
+// ─── 지반 / 토질 ─────────────────────────────────────────────────
 interface SoilParam {
-  soilType: SoilType
   gamma: number           // 흙 단위중량 (kN/m³)
   phi: number             // 내부마찰각 (°)
   c: number               // 점착력 (kPa)
-  Ka: number              // 주동토압계수 (자동계산 또는 직접입력)
   kaMode: 'auto' | 'manual'
+  Ka: number              // 주동토압계수
   delta: number           // 벽마찰각 (°)
-  // 지반 지지력
-  qa: number              // 허용지지력 (kPa)
+  qa: number              // 허용지지력 (kPa) — 직접기초
   muBase: number          // 기초 마찰계수
+  // 말뚝 (역T형)
+  Ra_vert: number         // 말뚝 연직 허용지지력 (kN/개)
+  Ra_horiz: number        // 말뚝 횡방향 허용지지력 (kN/개)
+  pileType: PileType
+  pileDia: number         // 말뚝 직경 (mm)
+  pileLen: number         // 말뚝 길이 (m)
+  pileN: number           // 말뚝 수 (단위폭당)
+  pileSpacing: number     // 말뚝 중심간격 (m)
 }
 
-interface AbutmentLoad {
-  // 상부 반력 (교좌로부터)
-  PDead: number           // 고정하중 반력 (kN/m)
-  PLive: number           // 활하중 반력 (kN/m)
-  // 수평 하중
-  braking: number         // 브레이킹 하중 (kN/m) — KDS 24 12 21
+// ─── 상부 하중 ───────────────────────────────────────────────────
+interface AbutLoad {
+  PDead: number           // 상부 고정하중 반력 (kN/m)
+  PLive: number           // 상부 활하중 반력 (kN/m)
+  braking: number         // 브레이킹 (kN/m)
   windH: number           // 풍하중 수평 (kN/m)
-  // 온도·건조수축 (kN/m)
-  tempH: number
-  // 뒤채움 활하중 등분포 (등가토압)
-  surcharge: number       // 상재하중 (kPa), 통상 10~12 kPa
-  // 수압
-  waterDepth: number      // 설계수위 깊이 (m)
+  tempH: number           // 온도·건조수축 (kN/m)
+  surcharge: number       // 뒤채움 상재하중 (kPa)
+  waterDepth: number      // 설계수위 (m)
   gammaWater: number      // 물 단위중량 (kN/m³)
 }
 
-interface StemRebar {
-  // 전면벽 주근 (수직)
-  mainDia: number
-  mainSpacing: number     // 간격 (mm)
-  mainRows: number        // 단수
-  // 배력근 (수평)
-  shrinkDia: number
-  shrinkSpacing: number
-  // 피복
-  cover: number
+// ─── 철근 ────────────────────────────────────────────────────────
+interface AbutRebar {
+  stemMainDia: number; stemMainSpacing: number
+  stemShrinkDia: number;  stemShrinkSpacing: number
+  stemCover: number
+  footMainDia: number; footMainSpacing: number
+  footCover: number
+  bwMainDia: number; bwMainSpacing: number; bwCover: number
 }
 
-interface FootRebar {
-  // 앞굽 하단
-  toeDia: number
-  toeSpacing: number
-  // 뒷굽 상단
-  heelDia: number
-  heelSpacing: number
-  cover: number
+// ─── 재료 ────────────────────────────────────────────────────────
+interface AbutMat {
+  fck: number; fy: number; Es: number; gammaCon: number
 }
 
-interface BackwallRebar {
-  mainDia: number
-  mainSpacing: number
-  cover: number
-}
-
-// ── 기본값 ───────────────────────────────────────────────────────
-const DEF_GEOM: AbutmentGeom = {
-  type: 'inverted-t',
-  stemHeight: 6.5, stemThickTop: 500, stemThickBot: 700,
-  backwallHeight: 1.2, backwallThick: 400,
-  footWidth: 5.5, footThick: 800, footToe: 1.5, footHeel: 2.8,
-  wingLength: 4.0, wingThick: 350,
+// ════ 기본값 ══════════════════════════════════════════════════════
+const DEF_SG: SemiGravityGeom = {
+  topWidth: 4.600,
+  backwallH: 1.500, backwallThick: 0.400, bearingPadW: 0.550,
+  stemH: 6.000, stemTopW: 1.500, stemBotW: 3.500,
+  frontStepH: 1.000, frontStepW: 0.400,
+  footH: 1.000, footToe: 1.000, footHeel: 1.800, footWidth: 4.600,
+  backStepH: 1.400, backStepW: 0.200,
   unitWidth: 1.0,
 }
-const DEF_MAT: AbutmentMaterial = { fck: 27, fy: 400, Es: 200000, gammaConcrete: 24 }
-const DEF_SOIL: SoilParam = {
-  soilType: 'sand', gamma: 18, phi: 30, c: 0,
-  Ka: 0.333, kaMode: 'auto', delta: 20,
-  qa: 300, muBase: 0.5,
+const DEF_IT: InvertedTGeom = {
+  backwallH: 0.880, backwallThick: 0.500,
+  bearingH: 0.300, bearingW: 0.750,
+  stemH: 3.500, stemTopW: 0.500, stemBotW: 1.300,
+  haunchH: 1.000, haunchW: 1.300,
+  footH: 1.820, capH: 1.820,
+  footToe: 0.750, footHeel: 0.750, footWidth: 5.900,
+  sumpH: 1.500,
+  unitWidth: 1.0,
 }
-const DEF_LOAD: AbutmentLoad = {
-  PDead: 450, PLive: 250,
-  braking: 25, windH: 10, tempH: 15,
+const DEF_MAT: AbutMat = { fck: 27, fy: 400, Es: 200000, gammaCon: 24 }
+const DEF_SOIL: SoilParam = {
+  gamma: 18, phi: 30, c: 0, kaMode: 'auto', Ka: 0.333, delta: 20,
+  qa: 300, muBase: 0.5,
+  Ra_vert: 1200, Ra_horiz: 120,
+  pileType: 'PHC', pileDia: 600, pileLen: 15, pileN: 3, pileSpacing: 1.80,
+}
+const DEF_LOAD: AbutLoad = {
+  PDead: 450, PLive: 250, braking: 25, windH: 10, tempH: 15,
   surcharge: 10, waterDepth: 0, gammaWater: 10,
 }
-const DEF_STEM_REB: StemRebar = { mainDia: 22, mainSpacing: 150, mainRows: 1, shrinkDia: 16, shrinkSpacing: 200, cover: 80 }
-const DEF_FOOT_REB: FootRebar = { toeDia: 22, toeSpacing: 150, heelDia: 22, heelSpacing: 150, cover: 80 }
-const DEF_BW_REB: BackwallRebar = { mainDia: 16, mainSpacing: 200, cover: 70 }
+const DEF_REB: AbutRebar = {
+  stemMainDia: 22, stemMainSpacing: 150, stemShrinkDia: 16, stemShrinkSpacing: 200, stemCover: 80,
+  footMainDia: 22, footMainSpacing: 150, footCover: 80,
+  bwMainDia: 16, bwMainSpacing: 200, bwCover: 70,
+}
 
-// ── 계산 헬퍼 ────────────────────────────────────────────────────
+// ════ 계산 헬퍼 ═══════════════════════════════════════════════════
+function calcKa(phi_deg: number) {
+  const phi = (phi_deg * Math.PI) / 180
+  return Math.tan(Math.PI / 4 - phi / 2) ** 2
+}
+function rebarAs(dia: number, spacing: number) {
+  return ((REBAR_AREA[dia] ?? 0) / spacing) * 1000
+}
 function ln(t: string, v?: string, indent = 0, type: CalcLine['type'] = 'eq'): CalcLine {
   return { type, text: t, value: v, indent }
 }
 function sec(t: string): CalcLine { return { type: 'section', text: t } }
-function verdict(ok: boolean, demand: number, capacity: number, unit: string): CalcLine {
-  return {
-    type: 'verdict',
-    text: ok ? '✓ O.K.' : '✗ N.G.',
-    value: `${demand.toFixed(2)} / ${capacity.toFixed(2)} ${unit} = ${(demand / capacity).toFixed(3)}`,
-  }
+function verdict(ok: boolean, d: number, c: number, u: string): CalcLine {
+  return { type: 'verdict', text: ok ? '✓ O.K.' : '✗ N.G.', value: `${d.toFixed(3)} / ${c.toFixed(3)} ${u} = ${(d/c).toFixed(3)}` }
 }
 function note(t: string): CalcLine { return { type: 'note', text: t } }
 
-// 주동토압계수 Rankine
-function calcKa(phi_deg: number): number {
-  const phi = (phi_deg * Math.PI) / 180
-  return Math.tan(Math.PI / 4 - phi / 2) ** 2
+// ════ 반중력식 자중 분할 계산 ═════════════════════════════════════
+interface WeightBlock { label: string; W: number; x: number } // W: kN/m, x: 앞굽 선단 기준
+
+function sgWeightBlocks(g: SemiGravityGeom, mat: AbutMat): WeightBlock[] {
+  const gc = mat.gammaCon
+  const b: WeightBlock[] = []
+  // 기초 앞굽 선단 = 원점 x=0
+  // ① 기초판 전체 (직사각형)
+  b.push({ label: '기초판', W: gc * g.footWidth * g.footH * g.unitWidth, x: g.footWidth / 2 })
+  // ② 줄기 — 뒷면 직선, 전면 경사 (사다리꼴)
+  // 줄기 뒷면 x 좌표 = footToe + stemBotW
+  // 상단: x_L = footToe + (stemBotW - stemTopW), x_R = footToe + stemBotW
+  // 뒷면 직선, 전면 경사 → 사다리꼴
+  const stemArea = ((g.stemTopW + g.stemBotW) / 2) * g.stemH
+  const xStemCentroid = g.footToe + g.stemBotW / 2  // 근사 (정확히는 무게중심)
+  b.push({ label: '줄기 (사다리꼴)', W: gc * stemArea * g.unitWidth, x: xStemCentroid })
+  // ③ 흉벽
+  b.push({ label: '흉벽', W: gc * g.backwallThick * g.backwallH * g.unitWidth,
+    x: g.footToe + g.stemBotW - g.backwallThick / 2 })
+  // ④ 전면 계단 (추가 부분)
+  b.push({ label: '전면 계단', W: gc * g.frontStepW * g.frontStepH * g.unitWidth,
+    x: g.footToe - g.frontStepW / 2 })
+  // ⑤ 뒷면 계단 (돌출)
+  b.push({ label: '뒷면 돌출', W: gc * g.backStepW * g.backStepH * g.unitWidth,
+    x: g.footToe + g.stemBotW + g.backStepW / 2 })
+  return b
 }
 
-// 전면벽 단면적 (간격당)
-function stemAs(reb: StemRebar): number {
-  const Abar = REBAR_AREA[reb.mainDia] ?? 0
-  return (Abar / reb.mainSpacing) * 1000 * reb.mainRows // mm²/m
-}
-function footAs(dia: number, spacing: number): number {
-  return ((REBAR_AREA[dia] ?? 0) / spacing) * 1000
+// ════ 역T형 자중 분할 계산 ═════════════════════════════════════════
+function itWeightBlocks(g: InvertedTGeom, mat: AbutMat): WeightBlock[] {
+  const gc = mat.gammaCon
+  const b: WeightBlock[] = []
+  // 기초 앞굽 선단 = 원점
+  // ① 기초판 (직사각형, 전체폭×footH)
+  b.push({ label: '기초 캡', W: gc * g.footWidth * g.footH * g.unitWidth, x: g.footWidth / 2 })
+  // ② 줄기 (사다리꼴 — 상단 좁고 하단 넓음)
+  const stemArea = ((g.stemTopW + g.stemBotW) / 2) * g.stemH
+  const xStemC = g.footToe + g.haunchW + g.stemBotW / 2  // 줄기 중심 (근사)
+  b.push({ label: '줄기', W: gc * stemArea * g.unitWidth, x: xStemC })
+  // ③ 헌치 (좌우 삼각형)
+  const haunchArea = 0.5 * g.haunchW * g.haunchH * 2  // 양쪽
+  b.push({ label: '헌치', W: gc * haunchArea * g.unitWidth,
+    x: g.footToe + g.haunchW / 2 + g.stemBotW / 2 + g.haunchW / 2 })
+  // ④ 흉벽
+  const xBw = g.footToe + g.haunchW + (g.stemBotW - g.backwallThick) / 2
+  b.push({ label: '흉벽', W: gc * g.backwallThick * g.backwallH * g.unitWidth, x: xBw })
+  return b
 }
 
-// ── 주요 검토 계산 ───────────────────────────────────────────────
-function calcAbutment(
-  geom: AbutmentGeom,
-  mat: AbutmentMaterial,
+// ════ 공통 안정·단면 검토 ════════════════════════════════════════
+function calcStability(
+  Wblocks: WeightBlock[],
+  soilW: number, soilX: number,   // 뒤채움 자중
+  superW: number, superX: number,  // 상부하중
+  Ea_tri: number, yTri: number,
+  Ea_sur: number, ySur: number,
+  Ea_water: number, yWater: number,
+  H_ext: number, hExt: number,    // 브레이킹 등 외부수평, 작용높이
+  footWidth: number,
   soil: SoilParam,
-  load: AbutmentLoad,
-  stemReb: StemRebar,
-  footReb: FootRebar,
-  bwReb: BackwallRebar,
-): CheckResult {
-  const items: CheckItem[] = []
-  const warns: string[] = []
+  _mat: AbutMat,
+  foundType: FoundType,
+  items: CheckItem[], warns: string[],
+) {
+  const V_con = Wblocks.reduce((s, b) => s + b.W, 0)
+  const Mr_con = Wblocks.reduce((s, b) => s + b.W * b.x, 0)
+  const V_soil = soilW
+  const V_super = superW
+  const V_total = V_con + V_soil + V_super
+  const Mr_total = Mr_con + V_soil * soilX + V_super * superX
 
-  const { fck, fy, gammaConcrete } = mat
-  const Ka = soil.kaMode === 'auto' ? calcKa(soil.phi) : soil.Ka
-  const b = geom.unitWidth * 1000 // mm (단위폭)
+  const Ea_total = Ea_tri + Ea_sur + Ea_water
+  const Mo = Ea_tri * yTri + Ea_sur * ySur + Ea_water * yWater + H_ext * hExt
+  const H_total = Ea_total + H_ext
 
-  // 유효깊이 헬퍼
-  const dStem = geom.stemThickBot - stemReb.cover - (stemReb.mainDia / 2)
-  const dToe  = geom.footThick - footReb.cover - (footReb.toeDia / 2)
-  const dHeel = geom.footThick - footReb.cover - (footReb.heelDia / 2)
-  const dBw   = geom.backwallThick - bwReb.cover - (bwReb.mainDia / 2)
-
-  const phi_flex = 0.85
-  const phi_shear = 0.75
-  const lambda = 1.0
-  const fckSqrt = Math.sqrt(fck)
-
-  // ── 1. 토압 합력 계산 ─────────────────────────────────────────
-  const H_total = geom.stemHeight + geom.backwallHeight + geom.footThick / 1000
-  const Ea_tri  = 0.5 * soil.gamma * Ka * H_total ** 2      // kN/m (삼각형 토압)
-  const Ea_sur  = load.surcharge * Ka * H_total              // kN/m (상재 등분포)
-  const Ea_water = load.waterDepth > 0
-    ? 0.5 * load.gammaWater * load.waterDepth ** 2 : 0
-  const Ea_total = Ea_tri + Ea_sur + Ea_water               // 전체 수평 합력
-
-  // 작용점 높이 (기초 하면 기준)
-  const yTri = H_total / 3
-  const ySur = H_total / 2
-  const yWater = load.waterDepth / 3
-  const Msoil = Ea_tri * yTri + Ea_sur * ySur + Ea_water * yWater  // kN·m/m (전도 모멘트)
-
-  // ── 2. 안정검토 — 전도 (KDS 11 50 15, F.S. ≥ 2.0) ────────────
-  const stemThickAvg = (geom.stemThickTop + geom.stemThickBot) / 2 / 1000 // m
-  const footToe = geom.footToe
-  const footHeel = geom.footHeel
-  const stemH = geom.stemHeight
-
-  // 수직력 및 저항 모멘트 (기초 앞굽 끝 기준)
-  const W_stem   = gammaConcrete * stemThickAvg * stemH * geom.unitWidth
-  const W_foot   = gammaConcrete * geom.footWidth * geom.footThick / 1000 * geom.unitWidth
-  const W_soil_heel = soil.gamma * footHeel * (stemH + geom.backwallHeight) * geom.unitWidth
-  const W_super  = (load.PDead + load.PLive) * geom.unitWidth
-  const W_bw     = gammaConcrete * geom.backwallThick / 1000 * geom.backwallHeight * geom.unitWidth
-  const V_total  = W_stem + W_foot + W_soil_heel + W_super + W_bw
-
-  // 저항 모멘트 (앞굽 선단 기준)
-  const xStem  = footToe + stemThickAvg / 2
-  const xFoot  = geom.footWidth / 2
-  const xHeel  = geom.footWidth - footHeel / 2
-  const xSuper = footToe + stemThickAvg / 2  // 교좌 위치 ≈ 줄기 중심
-  const xBw    = footToe + stemThickAvg / 2
-
-  const Mr = W_stem * xStem + W_foot * xFoot + W_soil_heel * xHeel
-    + W_super * xSuper + W_bw * xBw
-  // 수평 하중 모멘트 (전도)
-  const H_external = load.braking + load.windH + load.tempH
-  const Mo = Msoil + H_external * (stemH / 2) // 외부 수평력 작용점 ≈ 중간
-
-  const FS_overturning = Mr / Mo
-  const ok_ot = FS_overturning >= 2.0
-
-  {
-    const steps: CalcLine[] = [
-      sec('■ 토압 산정 (Rankine 주동토압)'),
-      ln(`Ka = tan²(45° - φ/2) = tan²(45° - ${soil.phi}°/2)`, `${Ka.toFixed(4)}`),
-      ln(`뒤채움 높이 H = H_벽 + H_흉벽 + t_기초 = ${geom.stemHeight} + ${geom.backwallHeight} + ${geom.footThick/1000}`, `${H_total.toFixed(2)} m`),
-      ln(`삼각형 토압 Ea = ½·γ·Ka·H² = ½×${soil.gamma}×${Ka.toFixed(3)}×${H_total.toFixed(2)}²`, `${Ea_tri.toFixed(2)} kN/m`),
-      ln(`상재 등분포 Ea_q = q·Ka·H = ${load.surcharge}×${Ka.toFixed(3)}×${H_total.toFixed(2)}`, `${Ea_sur.toFixed(2)} kN/m`),
-      load.waterDepth > 0 ? ln(`수압 Ew = ½·γw·hw² = ½×${load.gammaWater}×${load.waterDepth}²`, `${Ea_water.toFixed(2)} kN/m`) : note('수압 없음 (설계수위 = 0)'),
-      ln(`수평 합력 ΣH = ${Ea_tri.toFixed(2)} + ${Ea_sur.toFixed(2)} + ${Ea_water.toFixed(2)}`, `${Ea_total.toFixed(2)} kN/m`, 0, 'eq-key'),
-      sec('■ 전도 안정 (기준: F.S. ≥ 2.0, KDS 11 50 15)'),
-      ln(`저항 모멘트 Mr = Σ(W×x)`, `${Mr.toFixed(1)} kN·m/m`),
-      ln(`  W_줄기 = ${W_stem.toFixed(1)} kN/m × ${xStem.toFixed(2)} m`, `${(W_stem*xStem).toFixed(1)} kN·m/m`, 1),
-      ln(`  W_기초 = ${W_foot.toFixed(1)} kN/m × ${xFoot.toFixed(2)} m`, `${(W_foot*xFoot).toFixed(1)} kN·m/m`, 1),
-      ln(`  W_뒤채움 = ${W_soil_heel.toFixed(1)} kN/m × ${xHeel.toFixed(2)} m`, `${(W_soil_heel*xHeel).toFixed(1)} kN·m/m`, 1),
-      ln(`  W_상부 = ${W_super.toFixed(1)} kN/m × ${xSuper.toFixed(2)} m`, `${(W_super*xSuper).toFixed(1)} kN·m/m`, 1),
-      ln(`전도 모멘트 Mo = Ea_삼각형×H/3 + Ea_q×H/2 + 외부수평×H/2`, `${Mo.toFixed(1)} kN·m/m`),
-      ln(`F.S._전도 = Mr / Mo = ${Mr.toFixed(1)} / ${Mo.toFixed(1)}`, `${FS_overturning.toFixed(3)}`, 0, 'result'),
-      verdict(ok_ot, Mo, Mr / 2.0, 'kN·m/m'),
-    ]
-    if (!ok_ot) warns.push('전도 안정 F.S. < 2.0')
-    items.push({
-      id: 'overturning', label: '전도 안정', demandSymbol: 'Mo', capacitySymbol: 'Mr/2',
-      demand: Mo, capacity: Mr / 2.0, unit: 'kN·m/m',
-      SF: FS_overturning, ratio: 1 / FS_overturning * 2.0,
-      status: ok_ot ? 'OK' : 'NG',
-      formula: 'F.S. = Mr / Mo ≥ 2.0 (KDS 11 50 15)',
-      detail: {}, steps,
-    })
-  }
-
-  // ── 3. 안정검토 — 활동 (F.S. ≥ 1.5) ─────────────────────────
-  const Hres = V_total * soil.muBase
-  const H_act = Ea_total + H_external
-  const FS_sliding = Hres / H_act
-  const ok_sl = FS_sliding >= 1.5
-  {
-    const steps: CalcLine[] = [
-      sec('■ 활동 안정 (기준: F.S. ≥ 1.5, KDS 11 50 15)'),
+  // ── 전도 F.S. ≥ 2.0 ──
+  const FS_ot = Mr_total / Mo
+  const ok_ot = FS_ot >= 2.0
+  if (!ok_ot) warns.push('전도 안정 F.S. < 2.0')
+  items.push({
+    id: 'overturning', label: '전도 안정', demandSymbol: 'Mo', capacitySymbol: 'Mr/2',
+    demand: Mo, capacity: Mr_total / 2, unit: 'kN·m/m',
+    SF: FS_ot, ratio: 1 / FS_ot * 2,
+    status: ok_ot ? 'OK' : 'NG',
+    formula: 'F.S. = Mr / Mo ≥ 2.0 (KDS 11 50 15)',
+    detail: {},
+    steps: [
+      sec('■ 전도 안정 검토'),
       ln(`수직 합력 ΣV = ${V_total.toFixed(1)} kN/m`),
-      ln(`저항력 Hr = μ·ΣV = ${soil.muBase}×${V_total.toFixed(1)}`, `${Hres.toFixed(2)} kN/m`),
-      ln(`수평 작용력 ΣH = 토압 + 외부수평 = ${Ea_total.toFixed(2)} + ${H_external.toFixed(2)}`, `${H_act.toFixed(2)} kN/m`),
-      ln(`F.S._활동 = Hr / ΣH = ${Hres.toFixed(2)} / ${H_act.toFixed(2)}`, `${FS_sliding.toFixed(3)}`, 0, 'result'),
-      verdict(ok_sl, H_act, Hres / 1.5, 'kN/m'),
-      note('점착력 c > 0인 경우 Hr = μ·ΣV + c·B (이 계산에서는 사질토 가정)'),
-    ]
-    if (!ok_sl) warns.push('활동 안정 F.S. < 1.5')
-    items.push({
-      id: 'sliding', label: '활동 안정', demandSymbol: 'ΣH', capacitySymbol: 'Hr/1.5',
-      demand: H_act, capacity: Hres / 1.5, unit: 'kN/m',
-      SF: FS_sliding, ratio: H_act / (Hres / 1.5),
-      status: ok_sl ? 'OK' : 'NG',
-      formula: 'F.S. = μ·ΣV / ΣH ≥ 1.5',
-      detail: {}, steps,
-    })
-  }
+      ln(`저항 모멘트 Mr = ${Mr_total.toFixed(1)} kN·m/m`),
+      ln(`전도 모멘트 Mo = ${Mo.toFixed(1)} kN·m/m`),
+      ln(`F.S. = Mr / Mo`, `${FS_ot.toFixed(3)}`, 0, 'result'),
+      verdict(ok_ot, Mo, Mr_total / 2, 'kN·m/m'),
+    ],
+  })
 
-  // ── 4. 지반 지지력 검토 ───────────────────────────────────────
-  const e = geom.footWidth / 2 - (Mr - Mo) / V_total  // 편심거리
-  const Beff = geom.footWidth - 2 * e                  // 유효폭
-  const q_max = V_total / Beff
-  const ok_bc = q_max <= soil.qa
-  {
-    const steps: CalcLine[] = [
-      sec('■ 지반 지지력 검토 (KDS 11 50 15)'),
-      ln(`합력 작용점 x̄ = (Mr - Mo) / ΣV = (${Mr.toFixed(1)} - ${Mo.toFixed(1)}) / ${V_total.toFixed(1)}`, `${((Mr-Mo)/V_total).toFixed(3)} m`),
-      ln(`편심 e = B/2 - x̄ = ${geom.footWidth}/2 - ${((Mr-Mo)/V_total).toFixed(3)}`, `${e.toFixed(3)} m`),
-      Math.abs(e) > geom.footWidth / 6
-        ? { type: 'verdict' as const, text: '⚠ e > B/6 : 기초판 일부 인장 — 유효폭 산정', value: '' }
-        : note(`e = ${e.toFixed(3)} m ≤ B/6 = ${(geom.footWidth/6).toFixed(3)} m ✓`),
-      ln(`유효 기초폭 B' = B - 2e = ${geom.footWidth} - 2×${e.toFixed(3)}`, `${Beff.toFixed(3)} m`),
-      ln(`최대 지반 반력 q_max = ΣV / B' = ${V_total.toFixed(1)} / ${Beff.toFixed(3)}`, `${q_max.toFixed(1)} kPa`, 0, 'result'),
-      ln(`허용 지지력 qa`, `${soil.qa} kPa`),
-      verdict(ok_bc, q_max, soil.qa, 'kPa'),
-    ]
+  // ── 활동 F.S. ≥ 1.5 ──
+  const Hr = V_total * soil.muBase
+  const FS_sl = Hr / H_total
+  const ok_sl = FS_sl >= 1.5
+  if (!ok_sl) warns.push('활동 안정 F.S. < 1.5')
+  items.push({
+    id: 'sliding', label: '활동 안정', demandSymbol: 'ΣH', capacitySymbol: 'μ·ΣV/1.5',
+    demand: H_total, capacity: Hr / 1.5, unit: 'kN/m',
+    SF: FS_sl, ratio: H_total / (Hr / 1.5),
+    status: ok_sl ? 'OK' : 'NG',
+    formula: 'F.S. = μ·ΣV / ΣH ≥ 1.5',
+    detail: {},
+    steps: [
+      sec('■ 활동 안정 검토'),
+      ln(`저항력 Hr = μ·ΣV = ${soil.muBase}×${V_total.toFixed(1)}`, `${Hr.toFixed(1)} kN/m`),
+      ln(`수평 합력 ΣH`, `${H_total.toFixed(1)} kN/m`),
+      ln(`F.S.`, `${FS_sl.toFixed(3)}`, 0, 'result'),
+      verdict(ok_sl, H_total, Hr / 1.5, 'kN/m'),
+    ],
+  })
+
+  // ── 지반 지지력 (직접기초) ──
+  if (foundType === 'spread') {
+    const xbar = (Mr_total - Mo) / V_total
+    const e = footWidth / 2 - xbar
+    const Beff = Math.max(footWidth - 2 * Math.abs(e), 0.1)
+    const q_max = V_total / Beff
+    const ok_bc = q_max <= soil.qa
     if (!ok_bc) warns.push('지반 지지력 초과')
-    if (Math.abs(e) > geom.footWidth / 6) warns.push('편심 e > B/6 — 기초 재설계 필요')
+    if (Math.abs(e) > footWidth / 6) warns.push(`편심 e=${e.toFixed(3)}m > B/6`)
     items.push({
       id: 'bearing', label: '지반 지지력', demandSymbol: 'q_max', capacitySymbol: 'qa',
       demand: q_max, capacity: soil.qa, unit: 'kPa',
       SF: soil.qa / q_max, ratio: q_max / soil.qa,
       status: ok_bc ? 'OK' : 'NG',
       formula: 'q_max = ΣV/B\' ≤ qa',
-      detail: {}, steps,
+      detail: {},
+      steps: [
+        sec('■ 지반 지지력 검토 (KDS 11 50 15)'),
+        ln(`편심 e = B/2 - (Mr-Mo)/ΣV`, `${e.toFixed(3)} m`),
+        Math.abs(e) > footWidth/6 ? verdict(false, Math.abs(e), footWidth/6, 'm') : note(`e ≤ B/6 ✓`),
+        ln(`유효폭 B' = B - 2e`, `${Beff.toFixed(3)} m`),
+        ln(`q_max = ΣV/B'`, `${q_max.toFixed(1)} kPa`, 0, 'result'),
+        verdict(ok_bc, q_max, soil.qa, 'kPa'),
+      ],
     })
-  }
-
-  // ── 5. 전면벽 (줄기) 휨 강도 ─────────────────────────────────
-  // 검토 위치: 기초 상면 (줄기 하단) — 최대 모멘트
-  const Mu_stem_kNm = Ea_tri * (geom.stemHeight / 3)
-    + Ea_sur * (geom.stemHeight / 2)
-    + (H_external * geom.stemHeight / 2)  // kN·m/m
-
-  const As_stem = stemAs(stemReb)
-  const a_stem  = (As_stem * fy) / (0.85 * fck * b)
-  const phiMn_stem = phi_flex * As_stem * fy * (dStem - a_stem / 2) / 1e6  // kN·m/m
-  const ok_stem_flex = phiMn_stem >= Mu_stem_kNm
-  {
-    const As_one = REBAR_AREA[stemReb.mainDia] ?? 0
-    const steps: CalcLine[] = [
-      sec('■ 전면벽(줄기) 휨 강도 검토 (KDS 14 20 20)'),
-      note(`검토 위치: 기초 상면 (줄기 하단부 최대 모멘트)`),
-      ln(`설계 휨모멘트 Mu = Ea_tri·H_stem/3 + Ea_q·H_stem/2 + 외부수평·H_stem/2`),
-      ln(`  = ${Ea_tri.toFixed(2)}×${(geom.stemHeight/3).toFixed(2)} + ${Ea_sur.toFixed(2)}×${(geom.stemHeight/2).toFixed(2)} + ${H_external.toFixed(2)}×${(geom.stemHeight/2).toFixed(2)}`,
-        `${Mu_stem_kNm.toFixed(1)} kN·m/m`, 1),
-      ln(`인장 철근 D${stemReb.mainDia}@${stemReb.mainSpacing} (${stemReb.mainRows}단)`),
-      ln(`  As = ${As_one.toFixed(1)}mm² × 1000/${stemReb.mainSpacing} × ${stemReb.mainRows}`, `${As_stem.toFixed(0)} mm²/m`, 1),
-      ln(`  유효깊이 d = ${geom.stemThickBot} - ${stemReb.cover} - ${stemReb.mainDia/2}`, `${dStem.toFixed(0)} mm`, 1),
-      ln(`등가 응력블록 a = As·fy / (0.85·fck·b) = ${As_stem.toFixed(0)}×${fy}/(0.85×${fck}×1000)`, `${a_stem.toFixed(1)} mm`),
-      ln(`φMn = φ·As·fy·(d - a/2) = ${phi_flex}×${As_stem.toFixed(0)}×${fy}×(${dStem.toFixed(0)}-${(a_stem/2).toFixed(1)})/10⁶`,
-        `${phiMn_stem.toFixed(1)} kN·m/m`, 0, 'result'),
-      verdict(ok_stem_flex, Mu_stem_kNm, phiMn_stem, 'kN·m/m'),
-    ]
-    if (!ok_stem_flex) warns.push('전면벽 휨 강도 부족')
-    items.push({
-      id: 'stem-flex', label: '전면벽 휨강도', demandSymbol: 'Mu', capacitySymbol: 'φMn',
-      demand: Mu_stem_kNm, capacity: phiMn_stem, unit: 'kN·m/m',
-      SF: phiMn_stem / Mu_stem_kNm, ratio: Mu_stem_kNm / phiMn_stem,
-      status: ok_stem_flex ? 'OK' : 'NG',
-      formula: 'Mu ≤ φMn = φ·As·fy·(d - a/2)',
-      detail: {}, steps,
-    })
-  }
-
-  // ── 6. 전면벽 전단 강도 ───────────────────────────────────────
-  const Vu_stem = Ea_total + H_external  // kN/m
-  const Vc_stem = (lambda / 6) * fckSqrt * b * dStem / 1000  // kN/m
-  const phiVc_stem = phi_shear * Vc_stem
-  const ok_stem_shear = phiVc_stem >= Vu_stem
-  {
-    const steps: CalcLine[] = [
-      sec('■ 전면벽 전단 강도 검토 (KDS 14 20 22)'),
-      ln(`설계 전단력 Vu = ΣH = ${Ea_tri.toFixed(2)} + ${Ea_sur.toFixed(2)} + ${Ea_water.toFixed(2)} + ${H_external.toFixed(2)}`,
-        `${Vu_stem.toFixed(2)} kN/m`),
-      ln(`콘크리트 전단강도 Vc = (λ/6)√fck·b·d = (${lambda}/6)×√${fck}×1000×${dStem.toFixed(0)}/1000`,
-        `${Vc_stem.toFixed(1)} kN/m`),
-      ln(`φVc = ${phi_shear}×${Vc_stem.toFixed(1)}`, `${phiVc_stem.toFixed(1)} kN/m`, 0, 'result'),
-      verdict(ok_stem_shear, Vu_stem, phiVc_stem, 'kN/m'),
-      note('전면벽 전단 — 스터럽 없는 슬래브 형식으로 검토'),
-    ]
-    if (!ok_stem_shear) warns.push('전면벽 전단 강도 부족')
-    items.push({
-      id: 'stem-shear', label: '전면벽 전단강도', demandSymbol: 'Vu', capacitySymbol: 'φVc',
-      demand: Vu_stem, capacity: phiVc_stem, unit: 'kN/m',
-      SF: phiVc_stem / Vu_stem, ratio: Vu_stem / phiVc_stem,
-      status: ok_stem_shear ? 'OK' : 'NG',
-      formula: 'Vu ≤ φVc = φ·(λ/6)·√fck·b·d',
-      detail: {}, steps,
-    })
-  }
-
-  // ── 7. 뒷굽 기초판 휨 강도 ───────────────────────────────────
-  // 뒷굽: 줄기 후면에서 기초 끝까지, 순 상향 토압 - 자중
-  const q_avg = V_total / geom.footWidth   // 평균 지반 반력 kN/m²
-  const w_foot_self = gammaConcrete * geom.footThick / 1000       // 기초 자중 kN/m²
-  const q_net_heel  = q_avg - w_foot_self  // 순 반력 (보수적: 뒤채움 자중 무시)
-  const Mu_heel_kNm = (q_net_heel * footHeel ** 2) / 2          // kN·m/m
-  const As_heel = footAs(footReb.heelDia, footReb.heelSpacing)
-  const a_heel  = (As_heel * fy) / (0.85 * fck * b)
-  const phiMn_heel = phi_flex * As_heel * fy * (dHeel - a_heel / 2) / 1e6
-  const ok_heel = phiMn_heel >= Mu_heel_kNm
-  {
-    const steps: CalcLine[] = [
-      sec('■ 뒷굽 기초판 휨 강도 검토 (KDS 14 20 20)'),
-      ln(`평균 지반 반력 q_avg = ΣV / B = ${V_total.toFixed(1)} / ${geom.footWidth}`, `${q_avg.toFixed(1)} kN/m²`),
-      ln(`기초 자중 w_foot = γc·t_foot = ${gammaConcrete}×${geom.footThick/1000}`, `${w_foot_self.toFixed(1)} kN/m²`),
-      ln(`순 지반 반력 q_net = q_avg - w_foot = ${q_avg.toFixed(1)} - ${w_foot_self.toFixed(1)}`, `${q_net_heel.toFixed(1)} kN/m²`),
-      ln(`설계 휨모멘트 Mu = q_net·L²/2 = ${q_net_heel.toFixed(1)}×${footHeel}²/2`, `${Mu_heel_kNm.toFixed(1)} kN·m/m`),
-      ln(`뒷굽 상단 D${footReb.heelDia}@${footReb.heelSpacing}, As = ${As_heel.toFixed(0)} mm²/m`),
-      ln(`유효깊이 d = ${geom.footThick} - ${footReb.cover} - ${footReb.heelDia/2}`, `${dHeel.toFixed(0)} mm`),
-      ln(`a = ${As_heel.toFixed(0)}×${fy}/(0.85×${fck}×1000)`, `${a_heel.toFixed(1)} mm`),
-      ln(`φMn = ${phi_flex}×${As_heel.toFixed(0)}×${fy}×(${dHeel.toFixed(0)}-${(a_heel/2).toFixed(1)})/10⁶`,
-        `${phiMn_heel.toFixed(1)} kN·m/m`, 0, 'result'),
-      verdict(ok_heel, Mu_heel_kNm, phiMn_heel, 'kN·m/m'),
-    ]
-    if (!ok_heel) warns.push('뒷굽 기초판 휨 강도 부족')
-    items.push({
-      id: 'heel-flex', label: '뒷굽 기초판 휨', demandSymbol: 'Mu', capacitySymbol: 'φMn',
-      demand: Mu_heel_kNm, capacity: phiMn_heel, unit: 'kN·m/m',
-      SF: phiMn_heel / Mu_heel_kNm, ratio: Mu_heel_kNm / phiMn_heel,
-      status: ok_heel ? 'OK' : 'NG',
-      formula: 'Mu = q_net·L²/2 ≤ φMn',
-      detail: {}, steps,
-    })
-  }
-
-  // ── 8. 앞굽 기초판 휨 강도 ───────────────────────────────────
-  const q_toe = V_total / Beff * (1 + 6 * e / Beff)  // 앞굽 최대 반력 (사다리꼴)
-  const q_toe_avg = (q_toe + q_avg) / 2
-  const Mu_toe_kNm = (q_toe_avg * footToe ** 2) / 2 - (w_foot_self * footToe ** 2) / 2
-  const As_toe = footAs(footReb.toeDia, footReb.toeSpacing)
-  const a_toe  = (As_toe * fy) / (0.85 * fck * b)
-  const phiMn_toe = phi_flex * As_toe * fy * (dToe - a_toe / 2) / 1e6
-  const ok_toe = phiMn_toe >= Math.abs(Mu_toe_kNm)
-  {
-    const steps: CalcLine[] = [
-      sec('■ 앞굽 기초판 휨 강도 검토 (KDS 14 20 20)'),
-      ln(`앞굽 최대 지반 반력 q_toe = ΣV/B'·(1+6e/B')`, `${q_toe.toFixed(1)} kN/m²`),
-      ln(`설계 휨모멘트 Mu = (q_toe_avg - w_foot)·L_toe²/2`, `${Math.abs(Mu_toe_kNm).toFixed(1)} kN·m/m`),
-      ln(`앞굽 하단 D${footReb.toeDia}@${footReb.toeSpacing}, As = ${As_toe.toFixed(0)} mm²/m`),
-      ln(`유효깊이 d = ${geom.footThick} - ${footReb.cover} - ${footReb.toeDia/2}`, `${dToe.toFixed(0)} mm`),
-      ln(`φMn = ${phi_flex}×${As_toe.toFixed(0)}×${fy}×(${dToe.toFixed(0)}-${(a_toe/2).toFixed(1)})/10⁶`,
-        `${phiMn_toe.toFixed(1)} kN·m/m`, 0, 'result'),
-      verdict(ok_toe, Math.abs(Mu_toe_kNm), phiMn_toe, 'kN·m/m'),
-    ]
-    if (!ok_toe) warns.push('앞굽 기초판 휨 강도 부족')
-    items.push({
-      id: 'toe-flex', label: '앞굽 기초판 휨', demandSymbol: 'Mu', capacitySymbol: 'φMn',
-      demand: Math.abs(Mu_toe_kNm), capacity: phiMn_toe, unit: 'kN·m/m',
-      SF: phiMn_toe / Math.abs(Mu_toe_kNm), ratio: Math.abs(Mu_toe_kNm) / phiMn_toe,
-      status: ok_toe ? 'OK' : 'NG',
-      formula: 'Mu = q_avg·L_toe²/2 ≤ φMn',
-      detail: {}, steps,
-    })
-  }
-
-  // ── 9. 흉벽 휨 강도 ──────────────────────────────────────────
-  const Ea_bw_tri = 0.5 * soil.gamma * Ka * geom.backwallHeight ** 2
-  const Ea_bw_sur = load.surcharge * Ka * geom.backwallHeight
-  const Mu_bw_kNm = Ea_bw_tri * geom.backwallHeight / 3 + Ea_bw_sur * geom.backwallHeight / 2
-  const As_bw = footAs(bwReb.mainDia, bwReb.mainSpacing)
-  const a_bw  = (As_bw * fy) / (0.85 * fck * b)
-  const phiMn_bw = phi_flex * As_bw * fy * (dBw - a_bw / 2) / 1e6
-  const ok_bw = phiMn_bw >= Mu_bw_kNm
-  {
-    const steps: CalcLine[] = [
-      sec('■ 흉벽(뒷벽) 휨 강도 검토 (KDS 14 20 20)'),
-      ln(`흉벽 높이 H_bw = ${geom.backwallHeight} m`),
-      ln(`토압 Ea = ½·γ·Ka·H_bw² = ½×${soil.gamma}×${Ka.toFixed(3)}×${geom.backwallHeight}²`, `${Ea_bw_tri.toFixed(2)} kN/m`),
-      ln(`상재 Ea_q = q·Ka·H_bw = ${load.surcharge}×${Ka.toFixed(3)}×${geom.backwallHeight}`, `${Ea_bw_sur.toFixed(2)} kN/m`),
-      ln(`Mu = Ea×H/3 + Ea_q×H/2`, `${Mu_bw_kNm.toFixed(2)} kN·m/m`),
-      ln(`As = D${bwReb.mainDia}@${bwReb.mainSpacing} → ${As_bw.toFixed(0)} mm²/m`),
-      ln(`φMn`, `${phiMn_bw.toFixed(2)} kN·m/m`, 0, 'result'),
-      verdict(ok_bw, Mu_bw_kNm, phiMn_bw, 'kN·m/m'),
-    ]
-    if (!ok_bw) warns.push('흉벽 휨 강도 부족')
-    items.push({
-      id: 'backwall-flex', label: '흉벽 휨강도', demandSymbol: 'Mu', capacitySymbol: 'φMn',
-      demand: Mu_bw_kNm, capacity: phiMn_bw, unit: 'kN·m/m',
-      SF: phiMn_bw / Mu_bw_kNm, ratio: Mu_bw_kNm / phiMn_bw,
-      status: ok_bw ? 'OK' : 'NG',
-      formula: 'Mu ≤ φMn (흉벽 캔틸레버)',
-      detail: {}, steps,
-    })
-  }
-
-  const overallStatus: CheckStatus = items.some(i => i.status === 'NG')
-    ? 'NG' : items.some(i => i.status === 'WARN') ? 'WARN' : 'OK'
-
-  return {
-    moduleId: 'abutment',
-    items,
-    overallStatus,
-    maxRatio: Math.max(...items.map(i => i.ratio)),
-    warnings: warns,
   }
 }
 
-// ── SVG 교대 단면도 ──────────────────────────────────────────────
-function AbutmentDiagram({ geom, stemReb, footReb, bwReb }: {
-  geom: AbutmentGeom
-  stemReb: StemRebar
-  footReb: FootRebar
-  bwReb: BackwallRebar
-}) {
-  const W = 520; const H = 480
-  const pad = { l: 60, r: 80, t: 50, b: 60 }
-  const drawW = W - pad.l - pad.r
-  const drawH = H - pad.t - pad.b
+// ════ 단면 검토 (전면벽 휨/전단, 기초판 휨) ═══════════════════════
+function calcSection(
+  stemH: number, footHeel: number, footH: number,
+  _Ka: number, _soil: SoilParam, load: AbutLoad, mat: AbutMat, reb: AbutRebar,
+  Ea_tri: number, Ea_sur: number, H_ext: number,
+  items: CheckItem[], warns: string[],
+) {
+  const { fck, fy, gammaCon } = mat
+  const phi_f = 0.85, phi_v = 0.75, lam = 1.0
+  const b = 1000 // mm/m
 
-  // 스케일: 폭 방향
-  const totalW_m = geom.footWidth + 1.0  // 약간 여유
-  const totalH_m = geom.stemHeight + geom.backwallHeight + geom.footThick / 1000 + 0.5
-
-  const scaleX = drawW / totalW_m
-  const scaleY = drawH / totalH_m
-
-  const ox = pad.l          // 기초 앞굽 좌측 X
-  const oy = pad.t          // 최상단 Y (흉벽 상단)
-
-  // 좌표 변환
-  const tx = (xm: number) => ox + xm * scaleX
-  const ty = (ym: number) => oy + ym * scaleY  // y=0이 최상단
-
-  const stemThickBot_m = geom.stemThickBot / 1000
-  const stemThickTop_m = geom.stemThickTop / 1000
-  const bwThick_m = geom.backwallThick / 1000
-  const footThick_m = geom.footThick / 1000
-  const footToe = geom.footToe
-  const footHeel = geom.footHeel
-
-  // 기준점 (top of footing → y방향)
-  const y_top_bw   = 0
-  const y_bot_bw   = geom.backwallHeight
-  const y_bot_stem = geom.backwallHeight + geom.stemHeight
-  const y_bot_foot = y_bot_stem + footThick_m
-
-  // 흉벽 X 위치 (줄기 위에 위치)
-  const x_stem_L  = footToe
-  const x_stem_R  = footToe + stemThickBot_m
-  const x_stemT_L = footToe + (stemThickBot_m - stemThickTop_m) / 2
-  const x_stemT_R = x_stemT_L + stemThickTop_m
-  const x_bw_L    = footToe + (stemThickBot_m - bwThick_m) / 2
-  const x_bw_R    = x_bw_L + bwThick_m
-  const x_foot_L  = 0
-  const x_foot_R  = geom.footWidth
-
-  // 철근 그리기 헬퍼
-  const COV_S = stemReb.cover / 1000
-  const COV_F = footReb.cover / 1000
-
-  // 줄기 주근 (인장측 = 앞면)
-  const stemBarX = tx(x_stem_L + COV_S + stemReb.mainDia / 2000)
-  const stemBarCount = Math.min(5, Math.floor((geom.stemHeight * 1000 / stemReb.mainSpacing)))
-  const stemBars = Array.from({ length: stemBarCount }, (_, i) => {
-    const yRel = y_bot_bw + (geom.stemHeight / (stemBarCount + 1)) * (i + 1)
-    return ty(yRel)
+  // ── 전면벽 휨 (기초상면 위험단면) ──
+  const d_s = stemH * 1000 - reb.stemCover - reb.stemMainDia / 2  // mm
+  const Mu_s = (Ea_tri * stemH / 3 + Ea_sur * stemH / 2 + H_ext * stemH / 2)  // kN·m/m
+  const As_s = rebarAs(reb.stemMainDia, reb.stemMainSpacing)
+  const a_s = As_s * fy / (0.85 * fck * b)
+  const phiMn_s = phi_f * As_s * fy * (d_s - a_s / 2) / 1e6
+  const ok_sf = phiMn_s >= Mu_s
+  if (!ok_sf) warns.push('전면벽 휨 강도 부족')
+  items.push({
+    id: 'stem-flex', label: '전면벽 휨강도', demandSymbol: 'Mu', capacitySymbol: 'φMn',
+    demand: Mu_s, capacity: phiMn_s, unit: 'kN·m/m',
+    SF: phiMn_s / Mu_s, ratio: Mu_s / phiMn_s,
+    status: ok_sf ? 'OK' : 'NG',
+    formula: 'Mu = Ea·H/3 + Ea_q·H/2 ≤ φMn',
+    detail: {},
+    steps: [
+      sec('■ 전면벽 휨강도 (KDS 14 20 20)'),
+      note('위험단면: 기초 상면'),
+      ln(`Mu`, `${Mu_s.toFixed(1)} kN·m/m`),
+      ln(`As = D${reb.stemMainDia}@${reb.stemMainSpacing}`, `${As_s.toFixed(0)} mm²/m`),
+      ln(`d`, `${d_s.toFixed(0)} mm`),
+      ln(`φMn`, `${phiMn_s.toFixed(1)} kN·m/m`, 0, 'result'),
+      verdict(ok_sf, Mu_s, phiMn_s, 'kN·m/m'),
+    ],
   })
 
-  // 뒷굽 상단 철근
-  const heelBarY   = ty(y_bot_stem + COV_F + footReb.heelDia / 2000)
-  const heelBarX0  = tx(x_stem_R + 0.1)
-  const heelBarX1  = tx(x_foot_R - COV_F)
+  // ── 전면벽 전단 ──
+  const Vu_s = Ea_tri + Ea_sur + H_ext
+  const Vc_s = (lam / 6) * Math.sqrt(fck) * b * d_s / 1000
+  const phiVc_s = phi_v * Vc_s
+  const ok_sv = phiVc_s >= Vu_s
+  if (!ok_sv) warns.push('전면벽 전단 강도 부족')
+  items.push({
+    id: 'stem-shear', label: '전면벽 전단강도', demandSymbol: 'Vu', capacitySymbol: 'φVc',
+    demand: Vu_s, capacity: phiVc_s, unit: 'kN/m',
+    SF: phiVc_s / Vu_s, ratio: Vu_s / phiVc_s,
+    status: ok_sv ? 'OK' : 'NG',
+    formula: 'Vu ≤ φVc = φ(λ/6)√fck·b·d',
+    detail: {},
+    steps: [
+      sec('■ 전면벽 전단강도 (KDS 14 20 22)'),
+      ln(`Vu`, `${Vu_s.toFixed(1)} kN/m`),
+      ln(`φVc`, `${phiVc_s.toFixed(1)} kN/m`, 0, 'result'),
+      verdict(ok_sv, Vu_s, phiVc_s, 'kN/m'),
+    ],
+  })
 
-  // 앞굽 하단 철근
-  const toeBarY   = ty(y_bot_foot - COV_F - footReb.toeDia / 2000)
-  const toeBarX0  = tx(x_foot_L + COV_F)
-  const toeBarX1  = tx(x_stem_L - 0.1)
+  // ── 뒷굽 기초판 휨 ──
+  const d_h = footH * 1000 - reb.footCover - reb.footMainDia / 2
+  const q_avg = (load.PDead + load.PLive) / footHeel  // 근사 (단위 kN/m²)
+  const w_self = gammaCon * footH
+  const Mu_h = Math.max((q_avg - w_self) * footHeel ** 2 / 2, 0)
+  const As_h = rebarAs(reb.footMainDia, reb.footMainSpacing)
+  const a_h = As_h * fy / (0.85 * fck * b)
+  const phiMn_h = phi_f * As_h * fy * (d_h - a_h / 2) / 1e6
+  const ok_hf = phiMn_h >= Mu_h
+  if (!ok_hf) warns.push('뒷굽 기초판 휨 강도 부족')
+  items.push({
+    id: 'heel-flex', label: '뒷굽 기초판 휨', demandSymbol: 'Mu', capacitySymbol: 'φMn',
+    demand: Mu_h, capacity: phiMn_h, unit: 'kN·m/m',
+    SF: phiMn_h / Mu_h || 999, ratio: Mu_h / phiMn_h || 0,
+    status: ok_hf ? 'OK' : 'NG',
+    formula: 'Mu = q_net·L²/2 ≤ φMn',
+    detail: {},
+    steps: [
+      sec('■ 뒷굽 기초판 휨강도 (KDS 14 20 20)'),
+      ln(`뒷굽 L = ${footHeel.toFixed(3)} m`),
+      ln(`Mu`, `${Mu_h.toFixed(1)} kN·m/m`),
+      ln(`φMn`, `${phiMn_h.toFixed(1)} kN·m/m`, 0, 'result'),
+      verdict(ok_hf, Mu_h, phiMn_h, 'kN·m/m'),
+    ],
+  })
+}
 
-  // 치수 표시 헬퍼
-  const dimColor = '#1a56b0'
+// ════ 말뚝 지지력 (역T형) ═════════════════════════════════════════
+function calcPileCheck(
+  soil: SoilParam, V_total: number, H_total: number, M_total: number,
+  items: CheckItem[], warns: string[],
+) {
+  const { pileN, pileSpacing, Ra_vert, Ra_horiz } = soil
+  const n = pileN
+  // 단순 등간격 배치 (1열 기준)
+  const xs = Array.from({ length: n }, (_, i) => (i - (n - 1) / 2) * pileSpacing)
+  const sumX2 = xs.reduce((s, x) => s + x * x, 0)
+  const P_max = V_total / n + (M_total * Math.max(...xs.map(Math.abs))) / (sumX2 || 1)
+  const ok_pv = P_max <= Ra_vert
+  if (!ok_pv) warns.push('말뚝 연직 지지력 초과')
+  items.push({
+    id: 'pile-vert', label: '말뚝 연직 지지력', demandSymbol: 'P_max', capacitySymbol: 'Ra',
+    demand: P_max, capacity: Ra_vert, unit: 'kN',
+    SF: Ra_vert / P_max, ratio: P_max / Ra_vert,
+    status: ok_pv ? 'OK' : 'NG',
+    formula: 'P_max = ΣV/n + M·x/Σxi² ≤ Ra',
+    detail: {},
+    steps: [
+      sec('■ 말뚝 연직 지지력 (KDS 11 50 20)'),
+      ln(`말뚝 수 n`, `${n}개`),
+      ln(`Σxi²`, `${sumX2.toFixed(3)} m²`),
+      ln(`P_max = ${V_total.toFixed(1)}/${n} + ${M_total.toFixed(1)}×${Math.max(...xs.map(Math.abs)).toFixed(3)}/${sumX2.toFixed(3)}`, `${P_max.toFixed(1)} kN`, 0, 'result'),
+      verdict(ok_pv, P_max, Ra_vert, 'kN'),
+    ],
+  })
+  const H_per = H_total / n
+  const ok_ph = H_per <= Ra_horiz
+  if (!ok_ph) warns.push('말뚝 횡방향 지지력 초과')
+  items.push({
+    id: 'pile-horiz', label: '말뚝 횡방향 지지력', demandSymbol: 'H/n', capacitySymbol: 'Ra_lat',
+    demand: H_per, capacity: Ra_horiz, unit: 'kN',
+    SF: Ra_horiz / H_per, ratio: H_per / Ra_horiz,
+    status: ok_ph ? 'OK' : 'NG',
+    formula: 'H/n ≤ Ra_lat',
+    detail: {},
+    steps: [
+      sec('■ 말뚝 횡방향 지지력'),
+      ln(`H/n = ${H_total.toFixed(1)}/${n}`, `${H_per.toFixed(1)} kN`, 0, 'result'),
+      verdict(ok_ph, H_per, Ra_horiz, 'kN'),
+    ],
+  })
+}
+
+// ════ 메인 검토 함수 ══════════════════════════════════════════════
+function calcAbutSG(sg: SemiGravityGeom, mat: AbutMat, soil: SoilParam, load: AbutLoad, reb: AbutRebar, foundType: FoundType): CheckResult {
+  const items: CheckItem[] = []; const warns: string[] = []
+  const Ka = soil.kaMode === 'auto' ? calcKa(soil.phi) : soil.Ka
+  const H_total = sg.stemH + sg.backwallH + sg.footH  // 전체 높이 (기초 하면~흉벽 상면)
+
+  const Ea_tri  = 0.5 * soil.gamma * Ka * H_total ** 2
+  const Ea_sur  = load.surcharge * Ka * H_total
+  const Ea_wat  = load.waterDepth > 0 ? 0.5 * load.gammaWater * load.waterDepth ** 2 : 0
+  const H_ext   = load.braking + load.windH + load.tempH
+
+  const Wblocks = sgWeightBlocks(sg, mat)
+
+  // 뒤채움 토압
+  const soilW = soil.gamma * sg.footHeel * (sg.stemH + sg.backwallH) * sg.unitWidth
+  const soilX = sg.footToe + sg.stemBotW + sg.footHeel / 2
+
+  // 상부하중
+  const superW = (load.PDead + load.PLive) * sg.unitWidth
+  const superX = sg.footToe + sg.stemBotW - sg.backwallThick / 2
+
+  calcStability(
+    Wblocks, soilW, soilX, superW, superX,
+    Ea_tri, H_total / 3, Ea_sur, H_total / 2, Ea_wat, load.waterDepth / 3,
+    H_ext, sg.stemH / 2,
+    sg.footWidth, soil, mat, foundType, items, warns,
+  )
+  calcSection(sg.stemH, sg.footHeel, sg.footH, Ka, soil, load, mat, reb, Ea_tri, Ea_sur, H_ext, items, warns)
+
+  const os: CheckStatus = items.some(i => i.status === 'NG') ? 'NG' : items.some(i => i.status === 'WARN') ? 'WARN' : 'OK'
+  return { moduleId: 'abutment', items, overallStatus: os, maxRatio: Math.max(...items.map(i => i.ratio)), warnings: warns }
+}
+
+function calcAbutIT(it: InvertedTGeom, mat: AbutMat, soil: SoilParam, load: AbutLoad, reb: AbutRebar, foundType: FoundType): CheckResult {
+  const items: CheckItem[] = []; const warns: string[] = []
+  const Ka = soil.kaMode === 'auto' ? calcKa(soil.phi) : soil.Ka
+  const H_total = it.backwallH + it.stemH + it.haunchH + it.footH
+
+  const Ea_tri = 0.5 * soil.gamma * Ka * H_total ** 2
+  const Ea_sur = load.surcharge * Ka * H_total
+  const Ea_wat = load.waterDepth > 0 ? 0.5 * load.gammaWater * load.waterDepth ** 2 : 0
+  const H_ext  = load.braking + load.windH + load.tempH
+
+  const Wblocks = itWeightBlocks(it, mat)
+  const soilW = soil.gamma * it.footHeel * (it.stemH + it.backwallH) * it.unitWidth
+  const soilX = it.footToe + it.haunchW + it.stemBotW + it.haunchW + it.footHeel / 2
+
+  const superW = (load.PDead + load.PLive) * it.unitWidth
+  const stemCenterX = it.footToe + it.haunchW + it.stemTopW / 2
+  const superX = stemCenterX
+
+  const Vblocks_total = Wblocks.reduce((s, b) => s + b.W, 0) + soilW + superW
+  const Mr_total = Wblocks.reduce((s, b) => s + b.W * b.x, 0) + soilW * soilX + superW * superX
+  const Mo = Ea_tri * H_total / 3 + Ea_sur * H_total / 2 + Ea_wat * load.waterDepth / 3 + H_ext * it.stemH / 2
+
+  calcStability(
+    Wblocks, soilW, soilX, superW, superX,
+    Ea_tri, H_total / 3, Ea_sur, H_total / 2, Ea_wat, load.waterDepth / 3,
+    H_ext, it.stemH / 2,
+    it.footWidth, soil, mat, foundType, items, warns,
+  )
+
+  if (foundType === 'pile') {
+    calcPileCheck(soil, Vblocks_total, (Ea_tri + Ea_sur + Ea_wat + H_ext), Math.abs(Mr_total - Mo), items, warns)
+  }
+
+  calcSection(it.stemH + it.haunchH, it.footHeel, it.footH, Ka, soil, load, mat, reb, Ea_tri, Ea_sur, H_ext, items, warns)
+
+  const os: CheckStatus = items.some(i => i.status === 'NG') ? 'NG' : items.some(i => i.status === 'WARN') ? 'WARN' : 'OK'
+  return { moduleId: 'abutment', items, overallStatus: os, maxRatio: Math.max(...items.map(i => i.ratio)), warnings: warns }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// SVG 단면도 — 반중력식
+// ════════════════════════════════════════════════════════════════════
+function SemiGravityDiagram({ g }: { g: SemiGravityGeom }) {
+  // 캔버스
+  const SVG_W = 580, SVG_H = 520
+  const PAD = { l: 90, r: 90, t: 55, b: 65 }
+  const DW = SVG_W - PAD.l - PAD.r
+  const DH = SVG_H - PAD.t - PAD.b
+
+  // 전체 범위 (m): 폭 = footWidth + 여유, 높이 = 전체높이 + 여유
+  const totalH_m = g.footH + g.stemH + g.backwallH + 0.5
+  const totalW_m = g.footWidth + 0.5
+  const SX = DW / totalW_m
+  const SY = DH / totalH_m
+
+  // 좌표변환: x=0 → 기초 앞굽 선단, y=0 → 기초 하면
+  const ox = PAD.l
+  const oy = PAD.t + DH  // y=0이 하단 (기초 하면)
+  const tx = (xm: number) => ox + xm * SX
+  const ty = (ym: number) => oy - ym * SY
+
+  // ── 폴리곤 좌표 계산 (단면 외곽) ──
+  // 기초 하면 y=0, 기초 상면 y=footH
+  const yFoot = g.footH
+  const yStemTop = yFoot + g.stemH
+  const yBwTop = yStemTop + g.backwallH
+
+  // 전면(좌측) x 좌표들
+  const xFootL = 0                              // 앞굽 선단
+  const xFootR = g.footWidth                    // 뒷굽 선단
+  const xStemBotL = g.footToe                   // 줄기 하단 전면
+  const xStemBotR = g.footToe + g.stemBotW      // 줄기 하단 후면
+  const xStemTopL = g.footToe + (g.stemBotW - g.stemTopW)  // 줄기 상단 전면 (경사)
+  const xStemTopR = g.footToe + g.stemBotW      // 줄기 상단 후면 (직선)
+  const xBwL = xStemTopR - g.backwallThick      // 흉벽 전면
+  const xBwR = xStemTopR                        // 흉벽 후면
+  // 전면 계단
+  const xStepL = xStemBotL - g.frontStepW
+  const yStepTop = yFoot + g.frontStepH
+  // 후면 돌출
+  const xBackR = xStemBotR + g.backStepW
+  const yBackTop = yFoot + g.backStepH
+
+  // 단면 폴리곤 (시계방향, 외곽 전체)
+  // 앞굽 → 줄기 전면(계단+경사) → 흉벽 → 후면 → 뒷굽 → 기초 하면
+  const pts: [number, number][] = [
+    [xFootL, 0],               // 앞굽 하좌
+    [xFootL, yFoot],           // 앞굽 상좌
+    [xStepL, yFoot],           // 계단 좌측 (기초 상면)
+    [xStepL, yStepTop],        // 계단 좌상
+    [xStemBotL, yStepTop],     // 계단 우상 → 줄기 전면 시작 (경사 시작점)
+    [xStemTopL, yStemTop],     // 줄기 상단 전면 (경사 끝)
+    [xBwL, yStemTop],          // 흉벽 전면 하단
+    [xBwL, yBwTop],            // 흉벽 상단 전면
+    [xBwR, yBwTop],            // 흉벽 상단 후면
+    [xBwR, yStemTop],          // 흉벽 후면 하단
+    [xStemTopR, yStemTop],     // 줄기 상단 후면
+    [xStemTopR, yBackTop],     // 후면 직선 → 돌출 상단
+    [xBackR, yBackTop],        // 후면 돌출 우상
+    [xBackR, yFoot],           // 후면 돌출 하면
+    [xFootR, yFoot],           // 뒷굽 상면
+    [xFootR, 0],               // 뒷굽 하우
+  ]
+  const polyStr = pts.map(([x, y]) => `${tx(x).toFixed(1)},${ty(y).toFixed(1)}`).join(' ')
+
+  const DIM = '#1a56b0'
+  const FILL = '#dce8f5'
+  const STROKE = '#1e3a6e'
+
+  // 치수선 헬퍼
+  const hDim = (x1: number, x2: number, ym: number, label: string, offset = -14) => {
+    const y = ty(ym) + offset
+    return (
+      <g>
+        <line x1={tx(x1)} y1={y} x2={tx(x2)} y2={y} stroke={DIM} strokeWidth="0.8"
+          markerStart="url(#aR)" markerEnd="url(#aF)"/>
+        <line x1={tx(x1)} y1={y-4} x2={tx(x1)} y2={y+4} stroke={DIM} strokeWidth="0.6"/>
+        <line x1={tx(x2)} y1={y-4} x2={tx(x2)} y2={y+4} stroke={DIM} strokeWidth="0.6"/>
+        <text x={(tx(x1)+tx(x2))/2} y={y-4} textAnchor="middle" fontSize="9" fill={DIM}>{label}</text>
+      </g>
+    )
+  }
+  const vDim = (xm: number, y1: number, y2: number, label: string, offset = -16) => {
+    const x = tx(xm) + offset
+    return (
+      <g>
+        <line x1={x} y1={ty(y1)} x2={x} y2={ty(y2)} stroke={DIM} strokeWidth="0.8"
+          markerStart="url(#aR)" markerEnd="url(#aF)"/>
+        <line x1={x-4} y1={ty(y1)} x2={x+4} y2={ty(y1)} stroke={DIM} strokeWidth="0.6"/>
+        <line x1={x-4} y1={ty(y2)} x2={x+4} y2={ty(y2)} stroke={DIM} strokeWidth="0.6"/>
+        <text x={x-4} y={(ty(y1)+ty(y2))/2+3} textAnchor="end" fontSize="9" fill={DIM}>{label}</text>
+      </g>
+    )
+  }
 
   return (
-    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ fontFamily: 'JetBrains Mono, monospace', background: '#fff' }}>
+    <svg width="100%" viewBox={`0 0 ${SVG_W} ${SVG_H}`}
+      style={{ fontFamily: 'JetBrains Mono, monospace', background: '#fff', display: 'block' }}>
       <defs>
-        <marker id="arr" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
-          <path d="M0,0 L6,3 L0,6 Z" fill={dimColor}/>
+        <marker id="aF" markerWidth="5" markerHeight="5" refX="5" refY="2.5" orient="auto">
+          <path d="M0,0 L5,2.5 L0,5 Z" fill={DIM}/>
         </marker>
-        <marker id="arrR" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto-start-reverse">
-          <path d="M0,0 L6,3 L0,6 Z" fill={dimColor}/>
+        <marker id="aR" markerWidth="5" markerHeight="5" refX="0" refY="2.5" orient="auto">
+          <path d="M5,0 L0,2.5 L5,5 Z" fill={DIM}/>
         </marker>
-        <pattern id="hatch" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
-          <line x1="0" y1="0" x2="0" y2="6" stroke="#8b6914" strokeWidth="1.2" strokeOpacity="0.35"/>
+        <pattern id="hatch" patternUnits="userSpaceOnUse" width="5" height="5" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="5" stroke="#8b6914" strokeWidth="1" strokeOpacity="0.4"/>
         </pattern>
       </defs>
 
       {/* 제목 */}
-      <text x={W/2} y={22} textAnchor="middle" fontSize="11" fontWeight="700" fill="#1e2a3a">
-        역T형 교대 단면도 (단위폭 {geom.unitWidth}m 검토)
+      <text x={SVG_W/2} y={20} textAnchor="middle" fontSize="11.5" fontWeight="700" fill="#1e2a3a">
+        반중력식 교대 단면도
+      </text>
+      <text x={SVG_W/2} y={34} textAnchor="middle" fontSize="8.5" fill="#555">
+        (단위 : m)
       </text>
 
-      {/* ── 지반 (사선 해치) ── */}
-      <rect
-        x={tx(x_foot_R)} y={ty(y_top_bw)}
-        width={pad.r - 10} height={ty(y_bot_stem) - ty(y_top_bw)}
-        fill="url(#hatch)" opacity={0.7}
-      />
-      {/* 지표선 */}
-      <line x1={tx(x_foot_R)} y1={ty(y_bot_bw)} x2={tx(x_foot_R)+pad.r-10} y2={ty(y_bot_bw)}
-        stroke="#6b4f1a" strokeWidth="1.5" strokeDasharray="4,2"/>
-      <text x={tx(x_foot_R)+4} y={ty(y_bot_bw)-4} fontSize="8" fill="#6b4f1a">지표면</text>
+      {/* 지반 해치 (뒤채움) */}
+      <rect x={tx(xStemTopR)} y={ty(yBwTop)} width={tx(xFootR)-tx(xStemTopR)} height={ty(0)-ty(yBwTop)}
+        fill="url(#hatch)" opacity={0.6}/>
+      {/* 기초 하부 지반 */}
+      <rect x={tx(xFootL)} y={ty(0)} width={tx(xFootR)-tx(xFootL)} height={22}
+        fill="url(#hatch)" opacity={0.5}/>
+      <line x1={tx(xFootL)} y1={ty(0)} x2={tx(xFootR)} y2={ty(0)} stroke="#6b4f1a" strokeWidth="2"/>
 
-      {/* ── 기초 하면 지반 ── */}
-      <rect
-        x={tx(x_foot_L)} y={ty(y_bot_foot)}
-        width={(geom.footWidth)*scaleX} height={20}
-        fill="url(#hatch)" opacity={0.5}
-      />
-      <line x1={tx(x_foot_L)} y1={ty(y_bot_foot)} x2={tx(x_foot_R)} y2={ty(y_bot_foot)}
-        stroke="#6b4f1a" strokeWidth="2"/>
+      {/* 교대 본체 */}
+      <polygon points={polyStr} fill={FILL} stroke={STROKE} strokeWidth="2" strokeLinejoin="miter"/>
 
-      {/* ── 콘크리트 몸체 ── */}
-      {/* 기초판 */}
-      <rect
-        x={tx(x_foot_L)} y={ty(y_bot_stem)}
-        width={(x_foot_R - x_foot_L)*scaleX} height={footThick_m*scaleY}
-        fill="#e8eef6" stroke="#2c3e70" strokeWidth="1.5"
-      />
-      {/* 줄기 (사다리꼴) */}
-      <polygon
-        points={[
-          `${tx(x_stemT_L)},${ty(y_bot_bw)}`,
-          `${tx(x_stemT_R)},${ty(y_bot_bw)}`,
-          `${tx(x_stem_R)},${ty(y_bot_stem)}`,
-          `${tx(x_stem_L)},${ty(y_bot_stem)}`,
-        ].join(' ')}
-        fill="#e8eef6" stroke="#2c3e70" strokeWidth="1.5"
-      />
-      {/* 흉벽 */}
-      <rect
-        x={tx(x_bw_L)} y={ty(y_top_bw)}
-        width={bwThick_m*scaleX} height={geom.backwallHeight*scaleY}
-        fill="#e8eef6" stroke="#2c3e70" strokeWidth="1.5"
-      />
+      {/* G.L. 표시 */}
+      <line x1={tx(xStemTopR)-4} y1={ty(yStemTop)} x2={tx(xFootR)+20} y2={ty(yStemTop)}
+        stroke="#6b4f1a" strokeWidth="1.2" strokeDasharray="5,3"/>
+      <text x={tx(xFootR)+22} y={ty(yStemTop)+4} fontSize="8" fill="#6b4f1a">G.L.</text>
 
-      {/* ── 토압 화살표 ── */}
-      {[0.2, 0.45, 0.7].map((frac, i) => {
-        const arrowY = ty(y_bot_bw + geom.stemHeight * frac)
-        const arrowLen = 20 + frac * 30
-        return (
-          <g key={i}>
-            <line
-              x1={tx(x_foot_R) + arrowLen} y1={arrowY}
-              x2={tx(x_stemT_R) + 4} y2={arrowY}
-              stroke="#c0392b" strokeWidth="1.5"
-              markerEnd="url(#arr)"
-            />
-          </g>
-        )
-      })}
-      <text x={tx(x_foot_R) + 38} y={ty(y_bot_bw + geom.stemHeight * 0.25)} fontSize="9" fill="#c0392b" fontWeight="700">토압</text>
+      {/* 교좌 장치 표시 */}
+      <rect x={tx(xBwL)+4} y={ty(yBwTop)-12} width={(g.backwallThick*SX)-8} height={10}
+        fill="#6c8ebf" stroke="#3b5998" strokeWidth="1" rx="1"/>
+      <text x={tx((xBwL+xBwR)/2)} y={ty(yBwTop)-14} fontSize="7" fill="#3b5998" textAnchor="middle">교좌</text>
 
-      {/* 상부 수직 반력 */}
-      <line
-        x1={tx(x_stemT_L + stemThickTop_m/2)} y1={ty(y_top_bw) - 28}
-        x2={tx(x_stemT_L + stemThickTop_m/2)} y2={ty(y_top_bw) - 4}
-        stroke="#1a7a3c" strokeWidth="2" markerEnd="url(#arr)"
-      />
-      <text x={tx(x_stemT_L + stemThickTop_m/2) - 2} y={ty(y_top_bw) - 30}
-        fontSize="8" fill="#1a7a3c" textAnchor="middle">P_D+L</text>
-
-      {/* ── 철근 ── */}
-      {/* 줄기 인장 주근 (앞면) */}
-      {stemBars.map((yb, i) => (
-        <circle key={i} cx={stemBarX} cy={yb} r={Math.max(2.5, stemReb.mainDia/10)} fill="#c0392b" stroke="#7b1b0a" strokeWidth="0.5"/>
-      ))}
-      {/* 줄기 압축 주근 (뒷면) */}
-      {stemBars.map((yb, i) => (
-        <circle key={i} cx={tx(x_stemT_R - COV_S - stemReb.mainDia/2000)} cy={yb}
-          r={Math.max(2, stemReb.mainDia/12)} fill="#2980b9" stroke="#1a5276" strokeWidth="0.5"/>
-      ))}
-      {/* 뒷굽 상단 철근 */}
-      <line x1={heelBarX0} y1={heelBarY} x2={heelBarX1} y2={heelBarY}
-        stroke="#c0392b" strokeWidth={Math.max(2, footReb.heelDia/8)} strokeLinecap="round"/>
-      {/* 앞굽 하단 철근 */}
-      <line x1={toeBarX0} y1={toeBarY} x2={toeBarX1} y2={toeBarY}
-        stroke="#c0392b" strokeWidth={Math.max(2, footReb.toeDia/8)} strokeLinecap="round"/>
-      {/* 흉벽 주근 */}
-      <line x1={tx(x_bw_L + bwReb.cover/1000 + bwReb.mainDia/2000)} y1={ty(y_top_bw + 0.05)}
-        x2={tx(x_bw_L + bwReb.cover/1000 + bwReb.mainDia/2000)} y2={ty(y_bot_bw - 0.05)}
-        stroke="#c0392b" strokeWidth="2.5" strokeLinecap="round"/>
-
-      {/* ── 치수선 ── */}
-      {/* 전체 기초폭 */}
-      <line x1={tx(x_foot_L)} y1={ty(y_bot_foot)+28} x2={tx(x_foot_R)} y2={ty(y_bot_foot)+28}
-        stroke={dimColor} strokeWidth="0.8" markerStart="url(#arrR)" markerEnd="url(#arr)"/>
-      <text x={tx(x_foot_L + geom.footWidth/2)} y={ty(y_bot_foot)+40}
-        textAnchor="middle" fontSize="9" fill={dimColor}>B = {geom.footWidth.toFixed(1)}m</text>
-
+      {/* ── 상단 치수 (폭방향) ── */}
+      {/* 전체폭 */}
+      {hDim(xFootL, xFootR, 0, `${g.footWidth.toFixed(3)}`, ty(0)+38)}
       {/* 앞굽 */}
-      <line x1={tx(x_foot_L)} y1={ty(y_bot_foot)+14} x2={tx(x_stem_L)} y2={ty(y_bot_foot)+14}
-        stroke={dimColor} strokeWidth="0.8" markerStart="url(#arrR)" markerEnd="url(#arr)"/>
-      <text x={tx(x_foot_L + footToe/2)} y={ty(y_bot_foot)+12}
-        textAnchor="middle" fontSize="8" fill={dimColor}>L₁={footToe}m</text>
+      {hDim(xFootL, xStemBotL, yFoot, `${g.footToe.toFixed(3)}`)}
+      {/* 줄기 하단 */}
+      {hDim(xStemBotL, xStemBotR, yFoot, `${g.stemBotW.toFixed(3)}`)}
+      {/* 뒷굽 + 돌출 */}
+      {hDim(xStemBotR, xFootR, yFoot, `${(g.footHeel+g.backStepW).toFixed(3)}`)}
 
-      {/* 뒷굽 */}
-      <line x1={tx(x_stem_R)} y1={ty(y_bot_foot)+14} x2={tx(x_foot_R)} y2={ty(y_bot_foot)+14}
-        stroke={dimColor} strokeWidth="0.8" markerStart="url(#arrR)" markerEnd="url(#arr)"/>
-      <text x={tx(x_stem_R + footHeel/2)} y={ty(y_bot_foot)+12}
-        textAnchor="middle" fontSize="8" fill={dimColor}>L₂={footHeel}m</text>
+      {/* 상단 폭 치수 */}
+      {hDim(xStepL, xStemBotL, yStemTop+g.backwallH, `${g.frontStepW.toFixed(3)}`, ty(yStemTop+g.backwallH)-18)}
+      {hDim(xBwL, xBwR, yBwTop, `${g.backwallThick.toFixed(3)}`, ty(yBwTop)-18)}
 
-      {/* 줄기 높이 */}
-      <line x1={tx(x_foot_L)-20} y1={ty(y_bot_bw)} x2={tx(x_foot_L)-20} y2={ty(y_bot_stem)}
-        stroke={dimColor} strokeWidth="0.8" markerStart="url(#arrR)" markerEnd="url(#arr)"/>
-      <text x={tx(x_foot_L)-22} y={ty(y_bot_bw + geom.stemHeight/2)}
-        textAnchor="end" fontSize="9" fill={dimColor}>H={geom.stemHeight}m</text>
+      {/* ── 우측 높이 치수 ── */}
+      {vDim(xFootR, 0, yFoot, `${g.footH.toFixed(3)}`, 16)}
+      {vDim(xFootR, yFoot, yStemTop, `${g.stemH.toFixed(3)}`, 16)}
+      {vDim(xFootR, yStemTop, yBwTop, `${g.backwallH.toFixed(3)}`, 16)}
 
-      {/* 기초 두께 */}
-      <line x1={tx(x_foot_L)-20} y1={ty(y_bot_stem)} x2={tx(x_foot_L)-20} y2={ty(y_bot_foot)}
-        stroke={dimColor} strokeWidth="0.8" markerStart="url(#arrR)" markerEnd="url(#arr)"/>
-      <text x={tx(x_foot_L)-22} y={ty(y_bot_stem + footThick_m/2)}
-        textAnchor="end" fontSize="8" fill={dimColor}>t={geom.footThick}mm</text>
+      {/* ── 좌측 높이 치수 ── */}
+      {vDim(xFootL, yFoot, yStepTop, `${g.frontStepH.toFixed(3)}`)}
+      {vDim(xFootL, 0, g.footH + g.stemH, `${(g.footH+g.stemH).toFixed(3)}`)}
 
-      {/* 흉벽 높이 */}
-      <line x1={tx(x_bw_R)+6} y1={ty(y_top_bw)} x2={tx(x_bw_R)+6} y2={ty(y_bot_bw)}
-        stroke={dimColor} strokeWidth="0.8" markerStart="url(#arrR)" markerEnd="url(#arr)"/>
-      <text x={tx(x_bw_R)+8} y={ty(y_top_bw + geom.backwallHeight/2)}
-        fontSize="8" fill={dimColor}>H_bw={geom.backwallHeight}m</text>
+      {/* 전면 경사 주석 */}
+      <text x={tx((xStemBotL+xStemTopL)/2)-8} y={ty((yStepTop+yStemTop)/2)}
+        fontSize="8" fill="#444" textAnchor="end">경사</text>
 
-      {/* 줄기 하단 두께 */}
-      <line x1={tx(x_stem_L)} y1={ty(y_bot_stem)-6} x2={tx(x_stem_R)} y2={ty(y_bot_stem)-6}
-        stroke={dimColor} strokeWidth="0.8" markerStart="url(#arrR)" markerEnd="url(#arr)"/>
-      <text x={tx(x_stem_L + stemThickBot_m/2)} y={ty(y_bot_stem)-8}
-        textAnchor="middle" fontSize="8" fill={dimColor}>{geom.stemThickBot}mm</text>
-
-      {/* 철근 범례 */}
-      <g transform={`translate(${W-110}, ${pad.t+10})`}>
-        <rect width="106" height="62" fill="white" stroke="#ccc" strokeWidth="0.8" rx="2"/>
-        <text x="5" y="12" fontSize="8" fontWeight="700" fill="#333">[ 철근 범례 ]</text>
-        <circle cx="10" cy="24" r="3" fill="#c0392b"/>
-        <text x="17" y="27" fontSize="8" fill="#333">인장주근 D{stemReb.mainDia}@{stemReb.mainSpacing}</text>
-        <circle cx="10" cy="36" r="2.5" fill="#2980b9"/>
-        <text x="17" y="39" fontSize="8" fill="#333">압축주근 D{stemReb.mainDia}</text>
-        <line x1="5" y1="48" x2="17" y2="48" stroke="#c0392b" strokeWidth="2"/>
-        <text x="20" y="51" fontSize="8" fill="#333">기초 철근 D{footReb.heelDia}</text>
-        <line x1="5" y1="58" x2="17" y2="58" stroke="#c0392b" strokeWidth="2"/>
-        <text x="20" y="61" fontSize="8" fill="#333">앞굽 철근 D{footReb.toeDia}</text>
-      </g>
-
-      {/* 적용 기준 */}
-      <text x={pad.l} y={H-8} fontSize="7.5" fill="#888">
-        KDS 14 20 00 : 2025 / KDS 11 50 15 / 도로설계편람 교량편 (국토교통부)
+      {/* 적용기준 */}
+      <text x={PAD.l} y={SVG_H-8} fontSize="7.5" fill="#999">
+        도로설계편람 교량편(국토교통부) / KDS 14 20 00:2025 / KDS 11 50 15
       </text>
     </svg>
   )
 }
 
-// ── 입력 섹션 공통 스타일 ─────────────────────────────────────────
-const S = {
-  label: { fontSize: '0.72rem', color: 'var(--text-3)', fontFamily: 'var(--font-mono)', marginBottom: '2px' } as React.CSSProperties,
-  input: {
-    width: '100%', padding: '0.25rem 0.4rem', fontSize: '0.8rem',
-    border: '1px solid var(--border-dark)', borderRadius: '2px',
-    background: 'var(--bg)', color: 'var(--text)', fontFamily: 'var(--font-mono)',
-    boxSizing: 'border-box',
-  } as React.CSSProperties,
-  row: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem', marginBottom: '0.35rem' } as React.CSSProperties,
-  row3: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.4rem', marginBottom: '0.35rem' } as React.CSSProperties,
-  secTitle: {
-    fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-2)',
-    borderBottom: '1px solid var(--border-dark)', paddingBottom: '3px',
-    marginBottom: '0.4rem', marginTop: '0.6rem',
-    fontFamily: 'var(--font-mono)', textTransform: 'uppercase' as const,
-    letterSpacing: '0.06em',
-  } as React.CSSProperties,
+// ════════════════════════════════════════════════════════════════════
+// SVG 단면도 — 역T형 (말뚝기초)
+// ════════════════════════════════════════════════════════════════════
+function InvertedTDiagram({ g, soil, foundType }: { g: InvertedTGeom; soil: SoilParam; foundType: FoundType }) {
+  const SVG_W = 580
+  // 말뚝 있으면 더 높게
+  const pileExtra = foundType === 'pile' ? soil.pileLen * 0.7 + 1.5 : 0
+  const totalH_m = g.backwallH + g.stemH + g.haunchH + g.footH + g.sumpH + pileExtra + 0.5
+  const totalW_m = g.footWidth + 0.6
+  const PAD = { l: 90, r: 90, t: 55, b: 55 }
+  const SVG_H = 540 + (foundType === 'pile' ? Math.min(soil.pileLen * 8, 160) : 0)
+  const DW = SVG_W - PAD.l - PAD.r
+  const DH = SVG_H - PAD.t - PAD.b
+  const SX = DW / totalW_m
+  const SY = DH / totalH_m
+
+  // y=0 → 기초 하면 (캡 하단), 위로 증가
+  const ox = PAD.l
+  const oy = PAD.t + DH
+  const tx = (xm: number) => ox + xm * SX
+  const ty = (ym: number) => oy - ym * SY
+
+  // 높이 누적
+  const yCapTop = g.footH          // 기초 캡 상면
+  const yHaunchTop = yCapTop + g.haunchH
+  const yStemTop = yHaunchTop + g.stemH
+  const yBwTop = yStemTop + g.backwallH
+
+  // X 좌표
+  const xCapL = 0
+  const xCapR = g.footWidth
+  const xHaunchL = g.footToe
+  const xHaunchR = g.footWidth - g.footHeel
+  const xStemL = xHaunchL + g.haunchW
+  const xStemR = xHaunchR - g.haunchW
+  const xStemTopL = xStemL + (g.stemBotW - g.stemTopW) / 2  // 상단 약간 좁게 (직선이면 동일)
+  const xStemTopR = xStemR - (g.stemBotW - g.stemTopW) / 2
+  const xBwL = (xStemTopL + xStemTopR) / 2 - g.backwallThick / 2
+  const xBwR = xBwL + g.backwallThick
+
+  // 헌치 폴리곤 (좌측)
+  // 앞굽 → 기초상면 → 헌치경사 → 줄기하단 → 줄기상단 → ...
+  const ptsBody: [number, number][] = [
+    // 기초 캡 (하단)
+    [xCapL, 0], [xCapR, 0], [xCapR, yCapTop], [xHaunchR, yCapTop],
+    // 우측 헌치 경사
+    [xStemR, yHaunchTop],
+    // 줄기 우측
+    [xStemTopR, yStemTop],
+    // 흉벽
+    [xBwR, yStemTop], [xBwR, yBwTop], [xBwL, yBwTop], [xBwL, yStemTop],
+    // 줄기 좌측
+    [xStemTopL, yStemTop], [xStemL, yHaunchTop],
+    // 좌측 헌치 경사
+    [xHaunchL, yCapTop],
+    [xCapL, yCapTop],
+  ]
+  const polyBody = ptsBody.map(([x, y]) => `${tx(x).toFixed(1)},${ty(y).toFixed(1)}`).join(' ')
+
+  // 기초 하부 수조(sump) 돌출 — 없으면 생략
+  // (역T형은 기초 하면이 평평)
+
+  const DIM = '#1a56b0'
+  const FILL = '#dce8f5'
+  const STROKE = '#1e3a6e'
+
+  const hDim = (x1: number, x2: number, ym: number, label: string, yOffset = -14) => {
+    const y = ty(ym) + yOffset
+    return (
+      <g>
+        <line x1={tx(x1)} y1={y} x2={tx(x2)} y2={y} stroke={DIM} strokeWidth="0.8"
+          markerStart="url(#bR)" markerEnd="url(#bF)"/>
+        <line x1={tx(x1)} y1={y-3} x2={tx(x1)} y2={y+3} stroke={DIM} strokeWidth="0.6"/>
+        <line x1={tx(x2)} y1={y-3} x2={tx(x2)} y2={y+3} stroke={DIM} strokeWidth="0.6"/>
+        <text x={(tx(x1)+tx(x2))/2} y={y-3} textAnchor="middle" fontSize="9" fill={DIM}>{label}</text>
+      </g>
+    )
+  }
+  const vDim = (xm: number, y1: number, y2: number, label: string, xOffset = 16) => {
+    const x = tx(xm) + xOffset
+    return (
+      <g>
+        <line x1={x} y1={ty(y1)} x2={x} y2={ty(y2)} stroke={DIM} strokeWidth="0.8"
+          markerStart="url(#bR)" markerEnd="url(#bF)"/>
+        <line x1={x-3} y1={ty(y1)} x2={x+3} y2={ty(y1)} stroke={DIM} strokeWidth="0.6"/>
+        <line x1={x-3} y1={ty(y2)} x2={x+3} y2={ty(y2)} stroke={DIM} strokeWidth="0.6"/>
+        <text x={x+3} y={(ty(y1)+ty(y2))/2+3} fontSize="9" fill={DIM}>{label}</text>
+      </g>
+    )
+  }
+
+  // 말뚝 그리기
+  const pileYbot = -(soil.pileLen * 0.85)  // 말뚝 선단 (m 좌표, 하부)
+  const piles: number[] = []
+  if (foundType === 'pile') {
+    const n = soil.pileN
+    for (let i = 0; i < n; i++) {
+      piles.push(xCapL + g.footToe + (i - (n-1)/2) * soil.pileSpacing + g.footWidth/2 - g.footToe/2)
+    }
+  }
+  const pileDia_m = soil.pileDia / 1000
+
+  return (
+    <svg width="100%" viewBox={`0 0 ${SVG_W} ${SVG_H}`}
+      style={{ fontFamily: 'JetBrains Mono, monospace', background: '#fff', display: 'block' }}>
+      <defs>
+        <marker id="bF" markerWidth="5" markerHeight="5" refX="5" refY="2.5" orient="auto">
+          <path d="M0,0 L5,2.5 L0,5 Z" fill={DIM}/>
+        </marker>
+        <marker id="bR" markerWidth="5" markerHeight="5" refX="0" refY="2.5" orient="auto">
+          <path d="M5,0 L0,2.5 L5,5 Z" fill={DIM}/>
+        </marker>
+        <pattern id="hatchB" patternUnits="userSpaceOnUse" width="5" height="5" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="5" stroke="#8b6914" strokeWidth="1" strokeOpacity="0.4"/>
+        </pattern>
+      </defs>
+
+      {/* 제목 */}
+      <text x={SVG_W/2} y={20} textAnchor="middle" fontSize="11.5" fontWeight="700" fill="#1e2a3a">
+        역T형 교대 단면도
+      </text>
+      <text x={SVG_W/2} y={34} textAnchor="middle" fontSize="8.5" fill="#555">
+        {foundType === 'pile' ? `(말뚝기초 / 단위 : m)` : `(직접기초 / 단위 : m)`}
+      </text>
+
+      {/* 지반 해치 */}
+      <rect x={tx(xStemTopR)} y={ty(yBwTop)} width={tx(xCapR)-tx(xStemTopR)+20} height={ty(0)-ty(yBwTop)}
+        fill="url(#hatchB)" opacity={0.55}/>
+      {/* 기초 하부 지반 */}
+      {foundType === 'spread' && (
+        <>
+          <rect x={tx(xCapL)} y={ty(0)} width={tx(xCapR)-tx(xCapL)} height={20}
+            fill="url(#hatchB)" opacity={0.5}/>
+          <line x1={tx(xCapL)} y1={ty(0)} x2={tx(xCapR)} y2={ty(0)} stroke="#6b4f1a" strokeWidth="2"/>
+        </>
+      )}
+
+      {/* G.L. */}
+      <line x1={tx(xStemTopR)-4} y1={ty(yStemTop)} x2={tx(xCapR)+22} y2={ty(yStemTop)}
+        stroke="#6b4f1a" strokeWidth="1.2" strokeDasharray="5,3"/>
+      <text x={tx(xCapR)+24} y={ty(yStemTop)+4} fontSize="8" fill="#6b4f1a">G.L.</text>
+
+      {/* 말뚝 */}
+      {foundType === 'pile' && piles.map((px, i) => (
+        <g key={i}>
+          <rect
+            x={tx(px - pileDia_m/2)} y={ty(0)}
+            width={pileDia_m * SX} height={ty(pileYbot) - ty(0)}
+            fill="#b8c8df" stroke="#1a56b0" strokeWidth="1.2"
+          />
+          {/* 말뚝 선단 표시 */}
+          <line x1={tx(px-pileDia_m/2)-2} y1={ty(pileYbot)} x2={tx(px+pileDia_m/2)+2} y2={ty(pileYbot)}
+            stroke="#1a56b0" strokeWidth="1.5"/>
+          <text x={tx(px)} y={ty(pileYbot)+10} textAnchor="middle" fontSize="7" fill="#1a56b0">
+            φ{soil.pileDia}
+          </text>
+        </g>
+      ))}
+      {/* 말뚝 길이 치수 */}
+      {foundType === 'pile' && piles.length > 0 && (
+        <g>
+          <line x1={tx(xCapR)+32} y1={ty(0)} x2={tx(xCapR)+32} y2={ty(pileYbot)}
+            stroke={DIM} strokeWidth="0.8" markerStart="url(#bR)" markerEnd="url(#bF)"/>
+          <text x={tx(xCapR)+36} y={(ty(0)+ty(pileYbot))/2+3} fontSize="9" fill={DIM}>
+            L={soil.pileLen}m
+          </text>
+        </g>
+      )}
+
+      {/* 교대 본체 */}
+      <polygon points={polyBody} fill={FILL} stroke={STROKE} strokeWidth="2" strokeLinejoin="miter"/>
+
+      {/* 교좌 장치 */}
+      <rect x={tx(xBwL)+3} y={ty(yBwTop)-11} width={(g.backwallThick*SX)-6} height={9}
+        fill="#6c8ebf" stroke="#3b5998" strokeWidth="1" rx="1"/>
+      <text x={tx((xBwL+xBwR)/2)} y={ty(yBwTop)-13} fontSize="7" fill="#3b5998" textAnchor="middle">교좌</text>
+
+      {/* 기초 하면선 */}
+      <line x1={tx(xCapL)} y1={ty(0)} x2={tx(xCapR)} y2={ty(0)} stroke={STROKE} strokeWidth="2"/>
+
+      {/* ── 상단 치수 ── */}
+      {/* 전체 기초폭 */}
+      {hDim(xCapL, xCapR, 0, `${g.footWidth.toFixed(3)}`, ty(0)+36)}
+      {/* 앞굽 */}
+      {hDim(xCapL, xHaunchL, yCapTop, `${g.footToe.toFixed(3)}`)}
+      {/* 헌치 폭 좌 */}
+      {hDim(xHaunchL, xStemL, yHaunchTop, `${g.haunchW.toFixed(3)}`)}
+      {/* 줄기 하단 폭 */}
+      {hDim(xStemL, xStemR, yHaunchTop, `${g.stemBotW.toFixed(3)}`)}
+      {/* 헌치 폭 우 */}
+      {hDim(xStemR, xHaunchR, yHaunchTop, `${g.haunchW.toFixed(3)}`)}
+      {/* 뒷굽 */}
+      {hDim(xHaunchR, xCapR, yCapTop, `${g.footHeel.toFixed(3)}`)}
+      {/* 흉벽 */}
+      {hDim(xBwL, xBwR, yBwTop, `${g.backwallThick.toFixed(3)}`, ty(yBwTop)-18)}
+      {/* 줄기 상단 */}
+      {hDim(xStemTopL, xStemTopR, yStemTop, `${g.stemTopW.toFixed(3)}`, ty(yStemTop)-18)}
+
+      {/* ── 우측 높이 치수 ── */}
+      {vDim(xCapR, 0, yCapTop, `${g.footH.toFixed(3)}`)}
+      {vDim(xCapR, yCapTop, yHaunchTop, `${g.haunchH.toFixed(3)}`)}
+      {vDim(xCapR, yHaunchTop, yStemTop, `${g.stemH.toFixed(3)}`)}
+      {vDim(xCapR, yStemTop, yBwTop, `${g.backwallH.toFixed(3)}`)}
+
+      {/* 좌측 전체 높이 */}
+      {vDim(xCapL, 0, yBwTop, `${(g.footH+g.haunchH+g.stemH+g.backwallH).toFixed(3)}`, -16)}
+
+      {/* 헌치 경사선 표시 */}
+      <text x={tx(xHaunchL+g.haunchW*0.3)} y={ty(yCapTop+g.haunchH*0.6)+3}
+        fontSize="7.5" fill="#555">헌치</text>
+
+      {/* 적용기준 */}
+      <text x={PAD.l} y={SVG_H-8} fontSize="7.5" fill="#999">
+        도로설계편람 교량편(국토교통부) / KDS 14 20 00:2025 / KDS 11 50 20
+      </text>
+    </svg>
+  )
 }
 
-function Field({ label, unit, value, onChange, min, step }: {
-  label: string; unit?: string; value: number
-  onChange: (v: number) => void; min?: number; step?: number
-}) {
+// ════ 공통 스타일 ════════════════════════════════════════════════
+const S = {
+  label: { fontSize: '0.72rem', color: 'var(--text-3)', fontFamily: 'var(--font-mono)', marginBottom: '2px' } as React.CSSProperties,
+  inp: { width: '100%', padding: '0.22rem 0.4rem', fontSize: '0.8rem', border: '1px solid var(--border-dark)', borderRadius: '2px', background: 'var(--bg)', color: 'var(--text)', fontFamily: 'var(--font-mono)', boxSizing: 'border-box' } as React.CSSProperties,
+  row2: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.35rem', marginBottom: '0.3rem' } as React.CSSProperties,
+  row3: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.35rem', marginBottom: '0.3rem' } as React.CSSProperties,
+  sec: { fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-2)', borderBottom: '1px solid var(--border-dark)', paddingBottom: '2px', marginBottom: '0.35rem', marginTop: '0.55rem', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' as const, letterSpacing: '0.06em' } as React.CSSProperties,
+}
+
+function F({ label, unit, value, onChange, step, min }: { label: string; unit?: string; value: number; onChange: (v: number) => void; step?: number; min?: number }) {
   return (
     <div>
       <div style={S.label}>{label}{unit ? ` (${unit})` : ''}</div>
-      <input type="number" style={S.input} value={value} min={min ?? 0} step={step ?? 1}
+      <input type="number" style={S.inp} value={value} step={step ?? 0.001} min={min ?? 0}
         onChange={e => onChange(parseFloat(e.target.value) || 0)}/>
     </div>
   )
 }
 
-// ── 메인 패널 ────────────────────────────────────────────────────
+// ════ 메인 패널 ══════════════════════════════════════════════════
 export default function AbutmentPanel() {
   const { isDesktop } = useResponsive()
   const [tab, setTab] = useState<'input' | 'diagram' | 'result'>('diagram')
 
-  const [geom, setGeom]       = useState<AbutmentGeom>(DEF_GEOM)
-  const [mat, setMat]         = useState<AbutmentMaterial>(DEF_MAT)
-  const [soil, setSoil]       = useState<SoilParam>(DEF_SOIL)
-  const [load, setLoad]       = useState<AbutmentLoad>(DEF_LOAD)
-  const [stemReb, setStemReb] = useState<StemRebar>(DEF_STEM_REB)
-  const [footReb, setFootReb] = useState<FootRebar>(DEF_FOOT_REB)
-  const [bwReb, setBwReb]     = useState<BackwallRebar>(DEF_BW_REB)
-  const [result, setResult]   = useState<CheckResult | null>(null)
+  const [abutType, setAbutType] = useState<AbutType>('semi-gravity')
+  const [foundType, setFoundType] = useState<FoundType>('spread')
+  const [sg, setSg] = useState<SemiGravityGeom>(DEF_SG)
+  const [it, setIt] = useState<InvertedTGeom>(DEF_IT)
+  const [mat, setMat] = useState<AbutMat>(DEF_MAT)
+  const [soil, setSoil] = useState<SoilParam>(DEF_SOIL)
+  const [load, setLoad] = useState<AbutLoad>(DEF_LOAD)
+  const [reb, setReb] = useState<AbutRebar>(DEF_REB)
+  const [result, setResult] = useState<CheckResult | null>(null)
 
-  const g = useCallback(<K extends keyof AbutmentGeom>(k: K, v: AbutmentGeom[K]) =>
-    setGeom(p => ({ ...p, [k]: v })), [])
-  const m = useCallback(<K extends keyof AbutmentMaterial>(k: K, v: AbutmentMaterial[K]) =>
-    setMat(p => ({ ...p, [k]: v })), [])
-  const s = useCallback(<K extends keyof SoilParam>(k: K, v: SoilParam[K]) =>
-    setSoil(p => ({ ...p, [k]: v })), [])
-  const l = useCallback(<K extends keyof AbutmentLoad>(k: K, v: AbutmentLoad[K]) =>
-    setLoad(p => ({ ...p, [k]: v })), [])
-  const sr = useCallback(<K extends keyof StemRebar>(k: K, v: StemRebar[K]) =>
-    setStemReb(p => ({ ...p, [k]: v })), [])
-  const fr = useCallback(<K extends keyof FootRebar>(k: K, v: FootRebar[K]) =>
-    setFootReb(p => ({ ...p, [k]: v })), [])
-  const br = useCallback(<K extends keyof BackwallRebar>(k: K, v: BackwallRebar[K]) =>
-    setBwReb(p => ({ ...p, [k]: v })), [])
+  const upSg = useCallback(<K extends keyof SemiGravityGeom>(k: K, v: SemiGravityGeom[K]) => setSg(p => ({ ...p, [k]: v })), [])
+  const upIt = useCallback(<K extends keyof InvertedTGeom>(k: K, v: InvertedTGeom[K]) => setIt(p => ({ ...p, [k]: v })), [])
+  const upMat = useCallback(<K extends keyof AbutMat>(k: K, v: AbutMat[K]) => setMat(p => ({ ...p, [k]: v })), [])
+  const upSoil = useCallback(<K extends keyof SoilParam>(k: K, v: SoilParam[K]) => setSoil(p => ({ ...p, [k]: v })), [])
+  const upLoad = useCallback(<K extends keyof AbutLoad>(k: K, v: AbutLoad[K]) => setLoad(p => ({ ...p, [k]: v })), [])
+  const upReb = useCallback(<K extends keyof AbutRebar>(k: K, v: AbutRebar[K]) => setReb(p => ({ ...p, [k]: v })), [])
+
+  // 교대 타입 변경 시 기초 형식 자동 연동
+  const handleAbutType = (t: AbutType) => {
+    setAbutType(t)
+    if (t === 'inverted-t') setFoundType('pile')
+    else setFoundType('spread')
+    setResult(null)
+  }
 
   const handleCalc = () => {
-    setResult(calcAbutment(geom, mat, soil, load, stemReb, footReb, bwReb))
+    const r = abutType === 'semi-gravity'
+      ? calcAbutSG(sg, mat, soil, load, reb, foundType)
+      : calcAbutIT(it, mat, soil, load, reb, foundType)
+    setResult(r)
     if (!isDesktop) setTab('result')
   }
 
-  // ── 탭 버튼 ─────────────────────────────────────────────────
   const tabBtn = (t: typeof tab, label: string) => (
     <button onClick={() => setTab(t)} style={{
-      padding: '0.25rem 0.8rem', fontSize: '0.75rem', fontWeight: tab === t ? 700 : 500,
+      padding: '0.25rem 0.75rem', fontSize: '0.75rem', fontWeight: tab === t ? 700 : 500,
       background: tab === t ? 'var(--primary)' : 'var(--surface-2)',
       color: tab === t ? '#fff' : 'var(--text-2)',
       border: '1px solid var(--border-dark)', borderRadius: '2px', cursor: 'pointer',
@@ -808,128 +982,218 @@ export default function AbutmentPanel() {
     }}>{label}</button>
   )
 
-  // ── 입력 패널 ────────────────────────────────────────────────
+  // ── 반중력식 입력 폼 ─────────────────────────────────────────
+  const SgForm = (
+    <>
+      <div style={S.sec}>반중력식 교대 제원</div>
+      <div style={S.row2}>
+        <F label="흉벽 높이" unit="m" value={sg.backwallH} onChange={v => upSg('backwallH', v)} step={0.01}/>
+        <F label="흉벽 두께" unit="m" value={sg.backwallThick} onChange={v => upSg('backwallThick', v)} step={0.01}/>
+      </div>
+      <div style={S.row2}>
+        <F label="줄기 높이" unit="m" value={sg.stemH} onChange={v => upSg('stemH', v)} step={0.1}/>
+        <F label="줄기 상단폭" unit="m" value={sg.stemTopW} onChange={v => upSg('stemTopW', v)} step={0.01}/>
+      </div>
+      <div style={S.row2}>
+        <F label="줄기 하단폭" unit="m" value={sg.stemBotW} onChange={v => upSg('stemBotW', v)} step={0.01}/>
+        <F label="전면 계단 높이" unit="m" value={sg.frontStepH} onChange={v => upSg('frontStepH', v)} step={0.01}/>
+      </div>
+      <div style={S.row2}>
+        <F label="전면 계단 폭" unit="m" value={sg.frontStepW} onChange={v => upSg('frontStepW', v)} step={0.01}/>
+        <F label="후면 돌출 높이" unit="m" value={sg.backStepH} onChange={v => upSg('backStepH', v)} step={0.01}/>
+      </div>
+      <div style={S.row3}>
+        <F label="기초 전체폭" unit="m" value={sg.footWidth} onChange={v => upSg('footWidth', v)} step={0.01}/>
+        <F label="앞굽 L₁" unit="m" value={sg.footToe} onChange={v => upSg('footToe', v)} step={0.01}/>
+        <F label="뒷굽 L₂" unit="m" value={sg.footHeel} onChange={v => upSg('footHeel', v)} step={0.01}/>
+      </div>
+      <div style={S.row2}>
+        <F label="기초 두께" unit="m" value={sg.footH} onChange={v => upSg('footH', v)} step={0.01}/>
+        <F label="단위 폭" unit="m" value={sg.unitWidth} onChange={v => upSg('unitWidth', v)} step={0.1}/>
+      </div>
+    </>
+  )
+
+  // ── 역T형 입력 폼 ────────────────────────────────────────────
+  const ItForm = (
+    <>
+      <div style={S.sec}>역T형 교대 제원</div>
+      <div style={S.row2}>
+        <F label="흉벽 높이" unit="m" value={it.backwallH} onChange={v => upIt('backwallH', v)} step={0.01}/>
+        <F label="흉벽 두께" unit="m" value={it.backwallThick} onChange={v => upIt('backwallThick', v)} step={0.01}/>
+      </div>
+      <div style={S.row2}>
+        <F label="줄기 높이" unit="m" value={it.stemH} onChange={v => upIt('stemH', v)} step={0.1}/>
+        <F label="줄기 상단폭" unit="m" value={it.stemTopW} onChange={v => upIt('stemTopW', v)} step={0.01}/>
+      </div>
+      <div style={S.row2}>
+        <F label="줄기 하단폭" unit="m" value={it.stemBotW} onChange={v => upIt('stemBotW', v)} step={0.01}/>
+        <F label="헌치 높이" unit="m" value={it.haunchH} onChange={v => upIt('haunchH', v)} step={0.01}/>
+      </div>
+      <div style={S.row2}>
+        <F label="헌치 폭(편측)" unit="m" value={it.haunchW} onChange={v => upIt('haunchW', v)} step={0.01}/>
+        <F label="기초 캡 두께" unit="m" value={it.footH} onChange={v => upIt('footH', v)} step={0.01}/>
+      </div>
+      <div style={S.row3}>
+        <F label="기초 전체폭" unit="m" value={it.footWidth} onChange={v => upIt('footWidth', v)} step={0.01}/>
+        <F label="앞굽 L₁" unit="m" value={it.footToe} onChange={v => upIt('footToe', v)} step={0.01}/>
+        <F label="뒷굽 L₂" unit="m" value={it.footHeel} onChange={v => upIt('footHeel', v)} step={0.01}/>
+      </div>
+      <div style={S.row2}>
+        <F label="단위 폭" unit="m" value={it.unitWidth} onChange={v => upIt('unitWidth', v)} step={0.1}/>
+      </div>
+    </>
+  )
+
+  // ── 기초 형식 (말뚝 입력) ────────────────────────────────────
+  const FoundForm = (
+    <>
+      <div style={S.sec}>기초 형식</div>
+      <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.4rem' }}>
+        {(['spread', 'pile'] as FoundType[]).map(ft => (
+          <button key={ft} onClick={() => { setFoundType(ft); setResult(null) }} style={{
+            flex: 1, padding: '0.28rem', fontSize: '0.76rem', fontWeight: foundType === ft ? 700 : 400,
+            background: foundType === ft ? 'var(--primary-bg)' : 'var(--surface-2)',
+            color: foundType === ft ? 'var(--primary)' : 'var(--text-3)',
+            border: `1px solid ${foundType === ft ? 'var(--primary)' : 'var(--border-dark)'}`,
+            borderRadius: '2px', cursor: 'pointer', fontFamily: 'var(--font-mono)',
+          }}>
+            {ft === 'spread' ? '직접기초' : '말뚝기초'}
+          </button>
+        ))}
+      </div>
+      {foundType === 'spread' && (
+        <div style={S.row2}>
+          <F label="허용지지력 qa" unit="kPa" value={soil.qa} onChange={v => upSoil('qa', v)}/>
+          <F label="마찰계수 μ" value={soil.muBase} onChange={v => upSoil('muBase', v)} step={0.05}/>
+        </div>
+      )}
+      {foundType === 'pile' && (
+        <>
+          <div style={S.row2}>
+            <div>
+              <div style={S.label}>말뚝 종류</div>
+              <select style={S.inp} value={soil.pileType} onChange={e => upSoil('pileType', e.target.value as PileType)}>
+                <option value="PHC">PHC 말뚝</option>
+                <option value="steel-pipe">강관말뚝</option>
+                <option value="cast-in-place">현장타설</option>
+                <option value="H-pile">H형강</option>
+              </select>
+            </div>
+            <F label="말뚝 직경" unit="mm" value={soil.pileDia} onChange={v => upSoil('pileDia', v)} step={50}/>
+          </div>
+          <div style={S.row3}>
+            <F label="말뚝 길이" unit="m" value={soil.pileLen} onChange={v => upSoil('pileLen', v)} step={0.5}/>
+            <F label="말뚝 수" unit="개" value={soil.pileN} onChange={v => upSoil('pileN', Math.max(1,Math.round(v)))} step={1}/>
+            <F label="중심간격" unit="m" value={soil.pileSpacing} onChange={v => upSoil('pileSpacing', v)} step={0.1}/>
+          </div>
+          <div style={S.row2}>
+            <F label="연직 허용 Ra" unit="kN" value={soil.Ra_vert} onChange={v => upSoil('Ra_vert', v)}/>
+            <F label="횡방향 허용 Ra" unit="kN" value={soil.Ra_horiz} onChange={v => upSoil('Ra_horiz', v)}/>
+          </div>
+          <div style={S.row2}>
+            <F label="마찰계수 μ" value={soil.muBase} onChange={v => upSoil('muBase', v)} step={0.05}/>
+          </div>
+        </>
+      )}
+    </>
+  )
+
+  // ── 전체 입력 패널 ─────────────────────────────────────────
   const InputPanel = (
-    <div style={{ padding: '0.6rem 0.75rem', overflowY: 'auto', height: '100%', boxSizing: 'border-box' }}>
+    <div style={{ padding: '0.55rem 0.75rem', overflowY: 'auto', height: '100%', boxSizing: 'border-box' }}>
 
-      <div style={S.secTitle}>재료</div>
+      {/* 교대 형식 */}
+      <div style={S.sec}>교대 형식 선택</div>
+      <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.4rem' }}>
+        {(['semi-gravity', 'inverted-t'] as AbutType[]).map(at => (
+          <button key={at} onClick={() => handleAbutType(at)} style={{
+            flex: 1, padding: '0.3rem', fontSize: '0.76rem', fontWeight: abutType === at ? 700 : 400,
+            background: abutType === at ? 'var(--primary-bg)' : 'var(--surface-2)',
+            color: abutType === at ? 'var(--primary)' : 'var(--text-3)',
+            border: `1px solid ${abutType === at ? 'var(--primary)' : 'var(--border-dark)'}`,
+            borderRadius: '2px', cursor: 'pointer', fontFamily: 'var(--font-mono)',
+          }}>
+            {at === 'semi-gravity' ? '반중력식' : '역T형'}
+          </button>
+        ))}
+      </div>
+
+      {/* 재료 */}
+      <div style={S.sec}>재료</div>
       <div style={S.row3}>
-        <Field label="fck" unit="MPa" value={mat.fck} onChange={v => m('fck', v)}/>
-        <Field label="fy" unit="MPa" value={mat.fy} onChange={v => m('fy', v)}/>
-        <Field label="γc" unit="kN/m³" value={mat.gammaConcrete} onChange={v => m('gammaConcrete', v)}/>
+        <F label="fck" unit="MPa" value={mat.fck} onChange={v => upMat('fck', v)} step={1}/>
+        <F label="fy" unit="MPa" value={mat.fy} onChange={v => upMat('fy', v)} step={1}/>
+        <F label="γc" unit="kN/m³" value={mat.gammaCon} onChange={v => upMat('gammaCon', v)} step={0.5}/>
       </div>
 
-      <div style={S.secTitle}>교대 제원</div>
-      <div style={S.row}>
-        <Field label="전면벽 높이" unit="m" value={geom.stemHeight} onChange={v => g('stemHeight', v)} step={0.1}/>
-        <Field label="전면벽 상단 두께" unit="mm" value={geom.stemThickTop} onChange={v => g('stemThickTop', v)}/>
-      </div>
-      <div style={S.row}>
-        <Field label="전면벽 하단 두께" unit="mm" value={geom.stemThickBot} onChange={v => g('stemThickBot', v)}/>
-        <Field label="흉벽 높이" unit="m" value={geom.backwallHeight} onChange={v => g('backwallHeight', v)} step={0.1}/>
-      </div>
-      <div style={S.row}>
-        <Field label="흉벽 두께" unit="mm" value={geom.backwallThick} onChange={v => g('backwallThick', v)}/>
-        <Field label="기초판 두께" unit="mm" value={geom.footThick} onChange={v => g('footThick', v)}/>
-      </div>
+      {/* 교대 형식별 제원 */}
+      {abutType === 'semi-gravity' ? SgForm : ItForm}
+
+      {/* 토질 */}
+      <div style={S.sec}>토질 조건</div>
       <div style={S.row3}>
-        <Field label="기초폭 B" unit="m" value={geom.footWidth} onChange={v => g('footWidth', v)} step={0.1}/>
-        <Field label="앞굽 L₁" unit="m" value={geom.footToe} onChange={v => g('footToe', v)} step={0.1}/>
-        <Field label="뒷굽 L₂" unit="m" value={geom.footHeel} onChange={v => g('footHeel', v)} step={0.1}/>
+        <F label="γs" unit="kN/m³" value={soil.gamma} onChange={v => upSoil('gamma', v)} step={0.5}/>
+        <F label="φ" unit="°" value={soil.phi} onChange={v => upSoil('phi', v)} step={1}/>
+        <F label="c" unit="kPa" value={soil.c} onChange={v => upSoil('c', v)}/>
       </div>
-
-      <div style={S.secTitle}>토질 및 지반</div>
-      <div style={S.row}>
-        <Field label="흙 단위중량" unit="kN/m³" value={soil.gamma} onChange={v => s('gamma', v)} step={0.5}/>
-        <Field label="내부마찰각 φ" unit="°" value={soil.phi} onChange={v => s('phi', v)} step={1}/>
-      </div>
-      <div style={S.row}>
+      <div style={S.row2}>
         <div>
-          <div style={S.label}>Ka 입력방식</div>
-          <select style={S.input} value={soil.kaMode}
-            onChange={e => s('kaMode', e.target.value as 'auto'|'manual')}>
+          <div style={S.label}>Ka 방식</div>
+          <select style={S.inp} value={soil.kaMode} onChange={e => upSoil('kaMode', e.target.value as 'auto'|'manual')}>
             <option value="auto">자동 (Rankine)</option>
             <option value="manual">직접입력</option>
           </select>
         </div>
         {soil.kaMode === 'manual'
-          ? <Field label="Ka (직접입력)" value={soil.Ka} onChange={v => s('Ka', v)} step={0.001}/>
-          : <div>
-              <div style={S.label}>Ka (자동)</div>
-              <div style={{ ...S.input, background: 'var(--surface-2)', color: 'var(--text-3)' }}>
+          ? <F label="Ka" value={soil.Ka} onChange={v => upSoil('Ka', v)} step={0.001}/>
+          : <div><div style={S.label}>Ka (자동)</div>
+              <div style={{ ...S.inp, background: 'var(--surface-2)', color: 'var(--text-3)' }}>
                 {calcKa(soil.phi).toFixed(4)}
               </div>
-            </div>
-        }
-      </div>
-      <div style={S.row}>
-        <Field label="허용지지력 qa" unit="kPa" value={soil.qa} onChange={v => s('qa', v)}/>
-        <Field label="기초 마찰계수 μ" value={soil.muBase} onChange={v => s('muBase', v)} step={0.05}/>
+            </div>}
       </div>
 
-      <div style={S.secTitle}>하중</div>
-      <div style={S.row}>
-        <Field label="고정하중 반력 P_D" unit="kN/m" value={load.PDead} onChange={v => l('PDead', v)}/>
-        <Field label="활하중 반력 P_L" unit="kN/m" value={load.PLive} onChange={v => l('PLive', v)}/>
+      {/* 기초 형식 */}
+      {FoundForm}
+
+      {/* 상부 하중 */}
+      <div style={S.sec}>상부 하중</div>
+      <div style={S.row2}>
+        <F label="고정하중 P_D" unit="kN/m" value={load.PDead} onChange={v => upLoad('PDead', v)}/>
+        <F label="활하중 P_L" unit="kN/m" value={load.PLive} onChange={v => upLoad('PLive', v)}/>
       </div>
-      <div style={S.row}>
-        <Field label="브레이킹 하중" unit="kN/m" value={load.braking} onChange={v => l('braking', v)}/>
-        <Field label="풍하중 수평" unit="kN/m" value={load.windH} onChange={v => l('windH', v)}/>
+      <div style={S.row3}>
+        <F label="브레이킹" unit="kN/m" value={load.braking} onChange={v => upLoad('braking', v)}/>
+        <F label="풍하중" unit="kN/m" value={load.windH} onChange={v => upLoad('windH', v)}/>
+        <F label="온도·건조" unit="kN/m" value={load.tempH} onChange={v => upLoad('tempH', v)}/>
       </div>
-      <div style={S.row}>
-        <Field label="온도·건조수축" unit="kN/m" value={load.tempH} onChange={v => l('tempH', v)}/>
-        <Field label="상재하중 q" unit="kPa" value={load.surcharge} onChange={v => l('surcharge', v)}/>
-      </div>
-      <div style={S.row}>
-        <Field label="설계수위 hw" unit="m" value={load.waterDepth} onChange={v => l('waterDepth', v)} step={0.1}/>
-        <Field label="물 단위중량" unit="kN/m³" value={load.gammaWater} onChange={v => l('gammaWater', v)}/>
+      <div style={S.row2}>
+        <F label="상재하중 q" unit="kPa" value={load.surcharge} onChange={v => upLoad('surcharge', v)}/>
+        <F label="설계수위 hw" unit="m" value={load.waterDepth} onChange={v => upLoad('waterDepth', v)} step={0.1}/>
       </div>
 
-      <div style={S.secTitle}>전면벽 철근</div>
+      {/* 철근 */}
+      <div style={S.sec}>철근 상세</div>
       <div style={S.row3}>
         <div>
-          <div style={S.label}>주근 직경</div>
-          <select style={S.input} value={stemReb.mainDia} onChange={e => sr('mainDia', +e.target.value)}>
+          <div style={S.label}>전면벽 주근 D</div>
+          <select style={S.inp} value={reb.stemMainDia} onChange={e => upReb('stemMainDia', +e.target.value)}>
             {REBAR_DIAS.map(d => <option key={d} value={d}>D{d}</option>)}
           </select>
         </div>
-        <Field label="주근 간격" unit="mm" value={stemReb.mainSpacing} onChange={v => sr('mainSpacing', v)}/>
-        <Field label="피복두께" unit="mm" value={stemReb.cover} onChange={v => sr('cover', v)}/>
+        <F label="주근 간격" unit="mm" value={reb.stemMainSpacing} onChange={v => upReb('stemMainSpacing', v)} step={25}/>
+        <F label="피복" unit="mm" value={reb.stemCover} onChange={v => upReb('stemCover', v)} step={5}/>
       </div>
-
-      <div style={S.secTitle}>기초판 철근</div>
-      <div style={S.row}>
-        <div>
-          <div style={S.label}>뒷굽 상단 D</div>
-          <select style={S.input} value={footReb.heelDia} onChange={e => fr('heelDia', +e.target.value)}>
-            {REBAR_DIAS.map(d => <option key={d} value={d}>D{d}</option>)}
-          </select>
-        </div>
-        <Field label="뒷굽 간격" unit="mm" value={footReb.heelSpacing} onChange={v => fr('heelSpacing', v)}/>
-      </div>
-      <div style={S.row}>
-        <div>
-          <div style={S.label}>앞굽 하단 D</div>
-          <select style={S.input} value={footReb.toeDia} onChange={e => fr('toeDia', +e.target.value)}>
-            {REBAR_DIAS.map(d => <option key={d} value={d}>D{d}</option>)}
-          </select>
-        </div>
-        <Field label="앞굽 간격" unit="mm" value={footReb.toeSpacing} onChange={v => fr('toeSpacing', v)}/>
-      </div>
-      <div style={{ marginBottom: '0.35rem' }}>
-        <Field label="기초 피복" unit="mm" value={footReb.cover} onChange={v => fr('cover', v)}/>
-      </div>
-
-      <div style={S.secTitle}>흉벽 철근</div>
       <div style={S.row3}>
         <div>
-          <div style={S.label}>주근 직경</div>
-          <select style={S.input} value={bwReb.mainDia} onChange={e => br('mainDia', +e.target.value)}>
+          <div style={S.label}>기초판 주근 D</div>
+          <select style={S.inp} value={reb.footMainDia} onChange={e => upReb('footMainDia', +e.target.value)}>
             {REBAR_DIAS.map(d => <option key={d} value={d}>D{d}</option>)}
           </select>
         </div>
-        <Field label="주근 간격" unit="mm" value={bwReb.mainSpacing} onChange={v => br('mainSpacing', v)}/>
-        <Field label="피복두께" unit="mm" value={bwReb.cover} onChange={v => br('cover', v)}/>
+        <F label="간격" unit="mm" value={reb.footMainSpacing} onChange={v => upReb('footMainSpacing', v)} step={25}/>
+        <F label="피복" unit="mm" value={reb.footCover} onChange={v => upReb('footCover', v)} step={5}/>
       </div>
 
       <button onClick={handleCalc} style={{
@@ -937,42 +1201,43 @@ export default function AbutmentPanel() {
         background: 'var(--primary)', color: '#fff', border: 'none',
         borderRadius: '2px', fontSize: '0.82rem', fontWeight: 700,
         cursor: 'pointer', fontFamily: 'var(--font-mono)',
-      }}>
-        ▶ 검토 실행
-      </button>
+      }}>▶ 검토 실행</button>
     </div>
   )
 
-  // ── 데스크탑 3패널 ───────────────────────────────────────────
+  const DiagramPanel = (
+    <div style={{ padding: '0.5rem', background: '#fff', overflowY: 'auto', height: '100%' }}>
+      {abutType === 'semi-gravity'
+        ? <SemiGravityDiagram g={sg}/>
+        : <InvertedTDiagram g={it} soil={soil} foundType={foundType}/>}
+    </div>
+  )
+
+  const ResultPanel = result
+    ? <ResultTable items={result.items} overallStatus={result.overallStatus}/>
+    : <div style={{ padding: '2rem', color: 'var(--text-3)', fontSize: '0.8rem', textAlign: 'center', fontFamily: 'var(--font-mono)' }}>
+        검토 실행 후 결과가 표시됩니다
+      </div>
+
   if (isDesktop) {
     return (
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', height: '100%' }}>
-        {/* 좌: 입력 */}
         <div style={{ width: '22rem', minWidth: '22rem', borderRight: '1px solid var(--border-dark)', overflowY: 'auto' }}>
           {InputPanel}
         </div>
-        {/* 중: 단면도 */}
-        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: '#fff', padding: '0.5rem' }}>
-          <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-3)', marginBottom: '0.3rem', fontFamily: 'var(--font-mono)' }}>
-            SECTION DIAGRAM
+        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: '#fff' }}>
+          <div style={{ fontSize: '0.67rem', fontWeight: 700, color: 'var(--text-3)', padding: '0.3rem 0.6rem', borderBottom: '1px solid var(--border-light)', fontFamily: 'var(--font-mono)' }}>
+            {abutType === 'semi-gravity' ? 'SEMI-GRAVITY ABUTMENT' : 'INVERTED-T ABUTMENT'} / {foundType === 'spread' ? 'SPREAD FOUNDATION' : 'PILE FOUNDATION'}
           </div>
-          <div style={{ flex: 1, overflow: 'auto' }}>
-            <AbutmentDiagram geom={geom} stemReb={stemReb} footReb={footReb} bwReb={bwReb}/>
-          </div>
+          <div style={{ flex: 1, overflow: 'auto' }}>{DiagramPanel}</div>
         </div>
-        {/* 우: 결과 */}
         <div style={{ width: '26rem', minWidth: '26rem', borderLeft: '1px solid var(--border-dark)', overflowY: 'auto' }}>
-          {result
-            ? <ResultTable items={result.items} overallStatus={result.overallStatus}/>
-            : <div style={{ padding: '2rem', color: 'var(--text-3)', fontSize: '0.8rem', textAlign: 'center' }}>
-                검토 실행 후 결과가 표시됩니다
-              </div>}
+          {ResultPanel}
         </div>
       </div>
     )
   }
 
-  // ── 모바일 탭 ────────────────────────────────────────────────
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
       <div style={{ display: 'flex', gap: '0.3rem', padding: '0.4rem 0.6rem', background: 'var(--surface-2)', borderBottom: '1px solid var(--border-dark)' }}>
@@ -982,8 +1247,8 @@ export default function AbutmentPanel() {
       </div>
       <div style={{ flex: 1, overflow: 'auto' }}>
         {tab === 'input'   && InputPanel}
-        {tab === 'diagram' && <div style={{ padding: '0.5rem', background: '#fff' }}><AbutmentDiagram geom={geom} stemReb={stemReb} footReb={footReb} bwReb={bwReb}/></div>}
-        {tab === 'result'  && (result ? <ResultTable items={result.items} overallStatus={result.overallStatus}/> : <div style={{ padding: '2rem', color: 'var(--text-3)', fontSize: '0.8rem', textAlign: 'center' }}>검토 실행 후 결과가 표시됩니다</div>)}
+        {tab === 'diagram' && DiagramPanel}
+        {tab === 'result'  && ResultPanel}
       </div>
     </div>
   )
