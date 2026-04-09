@@ -10,6 +10,8 @@ export type ModuleId =
   | 'slab-punching'
   | 'rc-column'
   | 'rc-wall'
+  | 'abutment'
+  | 'foundation'
 
 export interface ModuleInfo {
   id: ModuleId
