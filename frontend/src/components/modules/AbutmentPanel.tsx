@@ -522,77 +522,70 @@ function calcAbutIT(it: InvertedTGeom, mat: AbutMat, soil: SoilParam, load: Abut
 }
 
 // ════════════════════════════════════════════════════════════════════
-// SVG 단면도 — 반중력식
-// 도로설계편람 제5편 교량 509편 삽도 기준
-// 형상: 후면 직선, 전면 상부 수직→하부 경사(앞으로 벌어짐)
-//        기초판 앞굽/뒷굽, 전면 계단(앞굽 위 돌출), 후면 뒤채움
+// SVG 단면도 — 반중력식 교대
+// 도로설계편람 제5편 교량 1.5절 삽도 형상 기준
+//
+// ▣ 형상:
+//   - 흉벽(backwall): 줄기 전면 상단에 위치 (앞쪽), 위에 교좌장치 블록
+//   - 줄기 후면: 수직 직선
+//   - 줄기 전면: 상단 수직(stemTopW) → 계단 상단까지 경사(앞으로 벌어짐) → 계단(frontStepW×frontStepH)
+//   - 후면 돌출(backStep): 기초 상면에서 줄기 후면 너머로 backStepW 돌출
+//   - 뒤채움: 줄기 후면~뒷굽 우단, G.L.까지
 // ════════════════════════════════════════════════════════════════════
 function SemiGravityDiagram({ g }: { g: SemiGravityGeom }) {
-  const SVG_W = 480, SVG_H = 460
-  const PAD = { l: 72, r: 56, t: 48, b: 52 }
+  const SVG_W = 520, SVG_H = 500
+  const PAD = { l: 82, r: 70, t: 52, b: 56 }
   const DW = SVG_W - PAD.l - PAD.r
   const DH = SVG_H - PAD.t - PAD.b
 
-  // 전체 범위
-  const totalH_m = g.footH + g.stemH + g.backwallH + 0.6
-  const totalW_m = g.footWidth + 0.4
+  const totalH_m = g.footH + g.stemH + g.backwallH + 0.5
+  const totalW_m = g.footWidth + 0.3
   const SX = DW / totalW_m
   const SY = DH / totalH_m
 
-  // 좌표계: x=0 → 기초 앞굽 선단, y=0 → 기초 하면
   const ox = PAD.l
   const oy = PAD.t + DH
   const tx = (xm: number) => ox + xm * SX
   const ty = (ym: number) => oy - ym * SY
 
-  // ── 높이 기준선 ──
-  const yFoot    = g.footH                      // 기초 상면
-  const yStemTop = yFoot + g.stemH              // 줄기 상면
-  const yBwTop   = yStemTop + g.backwallH       // 흉벽 상면
+  const yFoot    = g.footH
+  const yStemTop = yFoot + g.stemH
+  const yBwTop   = yStemTop + g.backwallH
 
-  // ── 폭 기준선 ──
-  // 도로설계편람 반중력식: 후면 수직, 전면 하부 경사(줄기 하단이 넓음)
-  const xFootL    = 0                           // 앞굽 선단
-  const xFootR    = g.footWidth                 // 뒷굽 선단
-  const xStemBotR = g.footToe + g.stemBotW      // 줄기 하단 후면 (= 기초 후면)
-  // 후면 직선: 줄기 상단 후면 = 줄기 하단 후면
-  const xStemTopR = xStemBotR
-  // 전면: 하단(기초 상면)에서 frontStepW만큼 앞굽 쪽으로 나온 곳에서 시작
-  //       frontStepH 높이는 수직(계단), 그 위부터 stemTopW 선까지 경사
-  const xStepBotL  = g.footToe - g.frontStepW  // 계단 전면 (앞굽보다 앞으로 나올 수 없으므로 clamp)
-  const xStemBotL  = g.footToe                 // 줄기 하단 전면 (기초 상면에서 시작)
-  const yStepTop   = yFoot + g.frontStepH      // 계단 상단
-  // 줄기 상단 전면: stemTopW 기준, 후면 기준으로 계산
-  const xStemTopL  = xStemTopR - g.stemTopW    // 줄기 상단 전면
-  // 흉벽: 줄기 상단 후면 쪽에 붙음
-  const xBwR = xStemTopR
-  const xBwL = xBwR - g.backwallThick
-  // 후면 뒷채움 상단 = G.L. = 줄기 상면 (yStemTop)
-  // 뒷굽 = xStemTopR ~ xFootR
-  const xHeelL = xStemBotR                     // 뒷굽 전면
-  const xHeelR = xFootR                        // 뒷굽 후면
+  const xFootL    = 0
+  const xFootR    = g.footWidth
+  // 줄기 후면: 수직 직선 (상하 동일)
+  const xStemR    = g.footToe + g.stemBotW
+  // 줄기 전면 하단
+  const xStemBotL = g.footToe
+  // 전면 계단
+  const xStepL    = g.footToe - g.frontStepW
+  const yStepTop  = yFoot + g.frontStepH
+  // 줄기 상단 전면: 후면에서 stemTopW 안쪽
+  const xStemTopL = xStemR - g.stemTopW
+  // 흉벽: 줄기 상단 전면 기준 (전면쪽에 위치)
+  const xBwL = xStemTopL
+  const xBwR = xBwL + g.backwallThick
+  // 후면 돌출
+  const xBackR   = xStemR + g.backStepW
+  const yBackTop = yFoot + g.backStepH
 
-  // ── 단면 외곽 폴리곤 (시계방향) ──
-  // 도로설계편람 기준 형상:
-  // [기초 하면 좌] → [기초 하면 우] → [뒷굽 상면 우] → [뒷굽 상면 좌=줄기 후면 하단]
-  // → [줄기 후면 상단] → [흉벽 후면 상단] → [흉벽 전면 상단] → [흉벽 전면 하단=줄기 상단 전면]
-  // → [전면 경사 하단=계단 상단 전면] → [계단 상단 우] → [앞굽 상면 우=줄기 전면 하단]
-  // → [앞굽 상면 좌] → [기초 하면 좌]
   const pts: [number, number][] = [
-    [xFootL,    0],           // ① 기초 하면 좌 (앞굽 선단 하단)
-    [xFootR,    0],           // ② 기초 하면 우 (뒷굽 선단 하단)
-    [xFootR,    yFoot],       // ③ 뒷굽 상면 우
-    [xHeelL,    yFoot],       // ④ 줄기 후면 하단 (기초 상면)
-    [xStemTopR, yStemTop],    // ⑤ 줄기 후면 상단 (후면 직선)
-    [xBwR,      yStemTop],    // ⑥ 흉벽 후면 하단
-    [xBwR,      yBwTop],      // ⑦ 흉벽 후면 상단
-    [xBwL,      yBwTop],      // ⑧ 흉벽 전면 상단
-    [xBwL,      yStemTop],    // ⑨ 흉벽 전면 하단 = 줄기 상단 전면 높이
-    [xStemTopL, yStemTop],    // ⑩ 줄기 상단 전면
-    [xStemBotL, yStepTop],    // ⑪ 경사 하단 (계단 상단 우)
-    [xStepBotL, yStepTop],    // ⑫ 계단 상단 좌
-    [xStepBotL, yFoot],       // ⑬ 계단 하단 좌 (기초 상면)
-    [xFootL,    yFoot],       // ⑭ 앞굽 상면 좌 (기초 상면)
+    [xFootL,    0],
+    [xFootR,    0],
+    [xFootR,    yFoot],
+    [xBackR,    yFoot],
+    [xBackR,    yBackTop],
+    [xStemR,    yBackTop],
+    [xStemR,    yStemTop],
+    [xBwR,      yStemTop],
+    [xBwR,      yBwTop],
+    [xBwL,      yBwTop],
+    [xBwL,      yStemTop],
+    [xStemBotL, yStepTop],
+    [xStepL,    yStepTop],
+    [xStepL,    yFoot],
+    [xFootL,    yFoot],
   ]
   const polyStr = pts.map(([x, y]) => `${tx(x).toFixed(1)},${ty(y).toFixed(1)}`).join(' ')
 
@@ -600,29 +593,31 @@ function SemiGravityDiagram({ g }: { g: SemiGravityGeom }) {
   const FILL = '#dce8f5'
   const STROKE = '#1e3a6e'
 
-  const hDim = (x1: number, x2: number, ym: number, label: string, yOff = -13) => {
+  const hDim = (x1: number, x2: number, ym: number, label: string, yOff = -15) => {
     const y = ty(ym) + yOff
     const cx = (tx(x1) + tx(x2)) / 2
     return (
       <g>
-        <line x1={tx(x1)} y1={y} x2={tx(x2)} y2={y} stroke={DIM} strokeWidth="0.8"
+        <line x1={tx(x1)} y1={y} x2={tx(x2)} y2={y} stroke={DIM} strokeWidth="1"
           markerStart="url(#aR)" markerEnd="url(#aF)"/>
-        <line x1={tx(x1)} y1={y-3} x2={tx(x1)} y2={y+3} stroke={DIM} strokeWidth="0.6"/>
-        <line x1={tx(x2)} y1={y-3} x2={tx(x2)} y2={y+3} stroke={DIM} strokeWidth="0.6"/>
-        <text x={cx} y={y-3} textAnchor="middle" fontSize="8.5" fill={DIM}>{label}</text>
+        <line x1={tx(x1)} y1={y-4} x2={tx(x1)} y2={y+4} stroke={DIM} strokeWidth="0.8"/>
+        <line x1={tx(x2)} y1={y-4} x2={tx(x2)} y2={y+4} stroke={DIM} strokeWidth="0.8"/>
+        <text x={cx} y={y-4} textAnchor="middle" fontSize="11" fontWeight="600" fill={DIM}>{label}</text>
       </g>
     )
   }
-  const vDim = (xm: number, y1: number, y2: number, label: string, xOff = 14) => {
+  const vDim = (xm: number, y1: number, y2: number, label: string, xOff: number) => {
     const x = tx(xm) + xOff
     const cy = (ty(y1) + ty(y2)) / 2
+    const anchor = xOff < 0 ? 'end' : 'start'
+    const lx = xOff < 0 ? x - 4 : x + 4
     return (
       <g>
-        <line x1={x} y1={ty(y1)} x2={x} y2={ty(y2)} stroke={DIM} strokeWidth="0.8"
+        <line x1={x} y1={ty(y1)} x2={x} y2={ty(y2)} stroke={DIM} strokeWidth="1"
           markerStart="url(#aR)" markerEnd="url(#aF)"/>
-        <line x1={x-3} y1={ty(y1)} x2={x+3} y2={ty(y1)} stroke={DIM} strokeWidth="0.6"/>
-        <line x1={x-3} y1={ty(y2)} x2={x+3} y2={ty(y2)} stroke={DIM} strokeWidth="0.6"/>
-        <text x={x+3} y={cy+3} fontSize="8.5" fill={DIM}>{label}</text>
+        <line x1={x-4} y1={ty(y1)} x2={x+4} y2={ty(y1)} stroke={DIM} strokeWidth="0.8"/>
+        <line x1={x-4} y1={ty(y2)} x2={x+4} y2={ty(y2)} stroke={DIM} strokeWidth="0.8"/>
+        <text x={lx} y={cy+4} textAnchor={anchor} fontSize="11" fontWeight="600" fill={DIM}>{label}</text>
       </g>
     )
   }
@@ -631,154 +626,120 @@ function SemiGravityDiagram({ g }: { g: SemiGravityGeom }) {
     <svg width="100%" viewBox={`0 0 ${SVG_W} ${SVG_H}`}
       style={{ fontFamily: 'JetBrains Mono, monospace', background: '#fff', display: 'block' }}>
       <defs>
-        <marker id="aF" markerWidth="5" markerHeight="5" refX="5" refY="2.5" orient="auto">
-          <path d="M0,0 L5,2.5 L0,5 Z" fill={DIM}/>
+        <marker id="aF" markerWidth="6" markerHeight="6" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L6,3 L0,6 Z" fill={DIM}/>
         </marker>
-        <marker id="aR" markerWidth="5" markerHeight="5" refX="0" refY="2.5" orient="auto">
-          <path d="M5,0 L0,2.5 L5,5 Z" fill={DIM}/>
+        <marker id="aR" markerWidth="6" markerHeight="6" refX="0" refY="3" orient="auto">
+          <path d="M6,0 L0,3 L6,6 Z" fill={DIM}/>
         </marker>
-        <pattern id="hatch" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
-          <line x1="0" y1="0" x2="0" y2="6" stroke="#8b6914" strokeWidth="1" strokeOpacity="0.45"/>
+        <pattern id="hatch" patternUnits="userSpaceOnUse" width="7" height="7" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="7" stroke="#8b6914" strokeWidth="1.2" strokeOpacity="0.5"/>
         </pattern>
       </defs>
 
-      {/* 제목 */}
-      <text x={SVG_W/2} y={18} textAnchor="middle" fontSize="11" fontWeight="700" fill="#1e2a3a">
-        반중력식 교대 단면도
-      </text>
-      <text x={SVG_W/2} y={30} textAnchor="middle" fontSize="8" fill="#777">(단위 : m)</text>
+      <text x={SVG_W/2} y={20} textAnchor="middle" fontSize="13" fontWeight="700" fill="#1e2a3a">반중력식 교대 단면도</text>
+      <text x={SVG_W/2} y={35} textAnchor="middle" fontSize="10" fill="#666">(단위 : m)</text>
 
       {/* 기초 하부 지반 */}
-      <rect x={tx(xFootL)-2} y={ty(0)} width={tx(xFootR)+4-tx(xFootL)} height={18}
-        fill="url(#hatch)" opacity={0.5}/>
-      <line x1={tx(xFootL)-2} y1={ty(0)} x2={tx(xFootR)+2} y2={ty(0)} stroke="#6b4f1a" strokeWidth="1.5"/>
+      <rect x={tx(xFootL)-2} y={ty(0)} width={tx(xFootR)-tx(xFootL)+4} height={20} fill="url(#hatch)" opacity={0.5}/>
+      <line x1={tx(xFootL)-2} y1={ty(0)} x2={tx(xFootR)+2} y2={ty(0)} stroke="#6b4f1a" strokeWidth="2"/>
 
-      {/* 뒤채움 토사 (G.L. 위, 줄기 후면~뒷굽 우측) */}
-      <rect
-        x={tx(xStemTopR)} y={ty(yBwTop)}
-        width={tx(xHeelR) - tx(xStemTopR)}
-        height={ty(yFoot) - ty(yBwTop)}
-        fill="url(#hatch)" opacity={0.55}/>
+      {/* 뒤채움 */}
+      <rect x={tx(xStemR)} y={ty(yStemTop)} width={tx(xFootR)-tx(xStemR)} height={ty(yFoot)-ty(yStemTop)} fill="url(#hatch)" opacity={0.5}/>
 
-      {/* G.L. 선 */}
-      <line x1={tx(xStemTopR)-2} y1={ty(yStemTop)} x2={tx(xHeelR)+24} y2={ty(yStemTop)}
-        stroke="#6b4f1a" strokeWidth="1.2" strokeDasharray="5,3"/>
-      <text x={tx(xHeelR)+26} y={ty(yStemTop)+4} fontSize="8" fill="#6b4f1a">G.L.</text>
+      {/* G.L. */}
+      <line x1={tx(xStemR)-2} y1={ty(yStemTop)} x2={tx(xFootR)+28} y2={ty(yStemTop)}
+        stroke="#555" strokeWidth="1.2" strokeDasharray="6,3"/>
+      <text x={tx(xFootR)+30} y={ty(yStemTop)+4} fontSize="10" fontWeight="600" fill="#555">G.L.</text>
 
       {/* 교대 본체 */}
-      <polygon points={polyStr} fill={FILL} stroke={STROKE} strokeWidth="1.8" strokeLinejoin="miter"/>
+      <polygon points={polyStr} fill={FILL} stroke={STROKE} strokeWidth="2" strokeLinejoin="miter"/>
 
-      {/* 교좌 장치 */}
-      <rect
-        x={tx(xBwL)+3} y={ty(yBwTop)-11}
-        width={Math.max(g.backwallThick * SX - 6, 4)} height={9}
-        fill="#6c8ebf" stroke="#3b5998" strokeWidth="0.9" rx="1"/>
-      <text x={tx((xBwL+xBwR)/2)} y={ty(yBwTop)-13}
-        fontSize="7" fill="#3b5998" textAnchor="middle">교좌</text>
+      {/* 교좌장치 */}
+      <rect x={tx(xBwL)+2} y={ty(yBwTop)-13} width={Math.max(g.backwallThick*SX-4,6)} height={11}
+        fill="#6c8ebf" stroke="#3b5998" strokeWidth="1" rx="1"/>
 
-      {/* ── 상부 치수 (폭방향) — 기초 하면 기준 ── */}
-      {/* 전체 기초폭 */}
-      {hDim(xFootL, xFootR, 0, `B=${g.footWidth.toFixed(2)}`, ty(0)+32)}
-      {/* 앞굽 */}
-      {hDim(xFootL, xStemBotL, yFoot, `L₁=${g.footToe.toFixed(2)}`)}
-      {/* 줄기 하단폭 */}
-      {hDim(xStemBotL, xStemBotR, yFoot, `${g.stemBotW.toFixed(2)}`)}
-      {/* 뒷굽 */}
-      {hDim(xHeelL, xHeelR, yFoot, `L₂=${g.footHeel.toFixed(2)}`)}
+      {hDim(xFootL, xFootR, 0, `${g.footWidth.toFixed(3)}`, ty(0)+40)}
+      {hDim(xFootL, xStemBotL, yFoot, `${g.footToe.toFixed(3)}`)}
+      {hDim(xStemBotL, xStemR, yFoot, `${g.stemBotW.toFixed(3)}`)}
+      {hDim(xStemR, xFootR, yFoot, `${g.footHeel.toFixed(3)}`)}
+      {hDim(xStemTopL, xStemR, yStemTop, `${g.stemTopW.toFixed(3)}`, -16)}
+      {hDim(xBwL, xBwR, yBwTop, `${g.backwallThick.toFixed(3)}`, -16)}
+      {hDim(xStepL, xStemBotL, yStepTop, `${g.frontStepW.toFixed(3)}`, -15)}
 
-      {/* 줄기 상단폭 & 흉벽 */}
-      {hDim(xStemTopL, xStemTopR, yStemTop, `${g.stemTopW.toFixed(2)}`, -13)}
-      {hDim(xBwL, xBwR, yBwTop, `${g.backwallThick.toFixed(2)}`, -13)}
-      {/* 전면 계단 폭 */}
-      {hDim(xStepBotL, xStemBotL, yStepTop, `${g.frontStepW.toFixed(2)}`, -12)}
+      {vDim(xFootR, 0, yFoot, `${g.footH.toFixed(3)}`, 14)}
+      {vDim(xFootR, yFoot, yStemTop, `${g.stemH.toFixed(3)}`, 14)}
+      {vDim(xFootR, yStemTop, yBwTop, `${g.backwallH.toFixed(3)}`, 14)}
+      {vDim(xFootL, yFoot, yStepTop, `${g.frontStepH.toFixed(3)}`, -52)}
+      {vDim(xFootL, 0, yStemTop, `${(g.footH+g.stemH).toFixed(3)}`, -66)}
 
-      {/* ── 우측 높이 치수 ── */}
-      {vDim(xHeelR, 0, yFoot, `t=${g.footH.toFixed(2)}`)}
-      {vDim(xHeelR, yFoot, yStemTop, `H=${g.stemH.toFixed(2)}`)}
-      {vDim(xHeelR, yStemTop, yBwTop, `h=${g.backwallH.toFixed(2)}`)}
-
-      {/* ── 좌측 높이 치수 ── */}
-      {/* 계단 높이 */}
-      {vDim(xFootL, yFoot, yStepTop, `${g.frontStepH.toFixed(2)}`, -44)}
-      {/* 기초 하면~줄기 상면 */}
-      {vDim(xFootL, 0, yStemTop, `${(g.footH+g.stemH).toFixed(2)}`, -56)}
-
-      {/* 전면 경사 표시선 */}
-      <text
-        x={(tx(xStemBotL)+tx(xStemTopL))/2 - 6}
-        y={(ty(yStepTop)+ty(yStemTop))/2}
-        fontSize="7.5" fill="#555" textAnchor="end">경사</text>
-
-      {/* 기준선 텍스트 */}
-      <text x={PAD.l} y={SVG_H-8} fontSize="7" fill="#aaa">
-        도로설계편람 교량편 / KDS 11 50 15
-      </text>
+      <text x={PAD.l} y={SVG_H-8} fontSize="8" fill="#bbb">도로설계편람 교량편 / KDS 11 50 15</text>
     </svg>
   )
 }
 
 // ════════════════════════════════════════════════════════════════════
 // SVG 단면도 — 역T형 교대
-// 도로설계편람 제5편 교량 509편 삽도 기준
-// 형상: 줄기 양면 수직(직선), 기초판 넓은 역T자, 말뚝기초
-//        흉벽은 줄기 후면에서 앞쪽으로 돌출
+// 도로설계편람 제5편 교량 1.4절 삽도 형상 기준
+//
+// ▣ 형상:
+//   - 흉벽: 줄기 상단 후면쪽에 위치 (xBwR=xStemTopR)
+//   - 줄기: stemTopW(상단) → stemBotW(하단, 헌치 상단) 로 약간 넓어짐
+//   - 헌치: 줄기 하단 좌우 haunchW 경사 돌출, 높이 haunchH
+//   - 기초 캡: footWidth × footH 직사각형
+//   - 말뚝: 기초 캡 하면에서 아래로, 등간격
+//   - 뒤채움: 줄기 후면~뒷굽, G.L.~기초 캡 상면
 // ════════════════════════════════════════════════════════════════════
 function InvertedTDiagram({ g, soil, foundType }: { g: InvertedTGeom; soil: SoilParam; foundType: FoundType }) {
-  const SVG_W = 480
-  // 말뚝 있으면 하단 여유
-  const pileDisplayLen = foundType === 'pile' ? Math.min(soil.pileLen, 12) : 0
-  const PAD = { l: 72, r: 60, t: 48, b: foundType === 'pile' ? 20 : 48 }
-  const totalH_m = g.footH + g.stemH + g.backwallH + pileDisplayLen * 0.9 + 0.8
-  const totalW_m = g.footWidth + 0.5
-  const SVG_H = foundType === 'pile' ? 520 : 460
+  const SVG_W = 520
+  const pileDisplayLen = foundType === 'pile' ? Math.min(soil.pileLen, 10) : 0
+  const PAD = { l: 82, r: 68, t: 52, b: foundType === 'pile' ? 24 : 52 }
+  const totalH_m = g.footH + g.haunchH + g.stemH + g.backwallH + pileDisplayLen * 0.85 + 0.6
+  const totalW_m = g.footWidth + 0.4
+  const SVG_H = foundType === 'pile' ? 560 : 500
   const DW = SVG_W - PAD.l - PAD.r
   const DH = SVG_H - PAD.t - PAD.b
   const SX = DW / totalW_m
   const SY = DH / totalH_m
 
-  // y=0 → 기초 하면, 위로 증가
   const ox = PAD.l
   const oy = PAD.t + DH
   const tx = (xm: number) => ox + xm * SX
   const ty = (ym: number) => oy - ym * SY
 
-  // ── 높이 기준선 ──
-  const yFoot    = g.footH                      // 기초 상면
-  const yStemTop = yFoot + g.stemH              // 줄기 상면 (= G.L.)
-  const yBwTop   = yStemTop + g.backwallH       // 흉벽 상면
+  const yCapTop    = g.footH
+  const yHaunchTop = yCapTop + g.haunchH
+  const yStemTop   = yHaunchTop + g.stemH
+  const yBwTop     = yStemTop + g.backwallH
 
-  // ── 폭 기준선 ──
-  // 역T형: 기초판 넓고, 줄기 수직(양면 직선)
-  // 기초 앞굽 선단 = x=0
-  const xCapL  = 0
-  const xCapR  = g.footWidth
-  // 줄기 전면 = 앞굽 끝에서 footToe 만큼 안쪽
-  const xStemL = g.footToe
-  // 줄기 후면 = 줄기 전면에서 stemBotW 만큼
-  const xStemR = g.footToe + g.stemBotW
-  // 역T형에서 stemTopW ≈ stemBotW (수직 줄기, 상하 동일폭)
-  // 줄기 상단도 동일 x좌표
-  const xStemTopL = xStemL
-  const xStemTopR = xStemR
-  // 흉벽: 줄기 후면 쪽에 붙음 (후면 기준으로 앞으로 backwallThick)
+  const xCapL   = 0
+  const xCapR   = g.footWidth
+  const xHaunchL = g.footToe
+  const xHaunchR = g.footWidth - g.footHeel
+  const xStemBotL = xHaunchL + g.haunchW
+  const xStemBotR = xHaunchR - g.haunchW
+  const stemCenterX = (xStemBotL + xStemBotR) / 2
+  const xStemTopL = stemCenterX - g.stemTopW / 2
+  const xStemTopR = stemCenterX + g.stemTopW / 2
+  // 흉벽: 줄기 상단 후면 기준
   const xBwR = xStemTopR
   const xBwL = xBwR - g.backwallThick
 
-  // 역T형 단면 외곽 폴리곤 (시계방향)
-  // 기초 하면 → 기초 우측 → 기초 상면 우측(뒷굽) → 줄기 후면 → 흉벽 → 줄기 전면 → 기초 상면 좌측(앞굽) → 기초 하면
   const ptsBody: [number, number][] = [
-    [xCapL,     0],          // ① 기초 하면 좌
-    [xCapR,     0],          // ② 기초 하면 우
-    [xCapR,     yFoot],      // ③ 기초 상면 우 (뒷굽 끝)
-    [xStemR,    yFoot],      // ④ 줄기 후면 기초 상면
-    [xStemTopR, yStemTop],   // ⑤ 줄기 후면 상단 (수직)
-    [xBwR,      yStemTop],   // ⑥ 흉벽 후면 하단
-    [xBwR,      yBwTop],     // ⑦ 흉벽 후면 상단
-    [xBwL,      yBwTop],     // ⑧ 흉벽 전면 상단
-    [xBwL,      yStemTop],   // ⑨ 흉벽 전면 하단
-    [xStemTopL, yStemTop],   // ⑩ 줄기 전면 상단
-    [xStemL,    yFoot],      // ⑪ 줄기 전면 기초 상면 (수직)
-    [xCapL,     yFoot],      // ⑫ 기초 상면 좌 (앞굽 끝)
+    [xCapL,     0],
+    [xCapR,     0],
+    [xCapR,     yCapTop],
+    [xHaunchR,  yCapTop],
+    [xStemBotR, yHaunchTop],
+    [xStemTopR, yStemTop],
+    [xBwR,      yStemTop],
+    [xBwR,      yBwTop],
+    [xBwL,      yBwTop],
+    [xBwL,      yStemTop],
+    [xStemTopL, yStemTop],
+    [xStemBotL, yHaunchTop],
+    [xHaunchL,  yCapTop],
+    [xCapL,     yCapTop],
   ]
   const polyBody = ptsBody.map(([x, y]) => `${tx(x).toFixed(1)},${ty(y).toFixed(1)}`).join(' ')
 
@@ -786,41 +747,40 @@ function InvertedTDiagram({ g, soil, foundType }: { g: InvertedTGeom; soil: Soil
   const FILL = '#dce8f5'
   const STROKE = '#1e3a6e'
 
-  const hDim = (x1: number, x2: number, ym: number, label: string, yOff = -13) => {
+  const hDim = (x1: number, x2: number, ym: number, label: string, yOff = -15) => {
     const y = ty(ym) + yOff
     const cx = (tx(x1) + tx(x2)) / 2
     return (
       <g>
-        <line x1={tx(x1)} y1={y} x2={tx(x2)} y2={y} stroke={DIM} strokeWidth="0.8"
+        <line x1={tx(x1)} y1={y} x2={tx(x2)} y2={y} stroke={DIM} strokeWidth="1"
           markerStart="url(#bR)" markerEnd="url(#bF)"/>
-        <line x1={tx(x1)} y1={y-3} x2={tx(x1)} y2={y+3} stroke={DIM} strokeWidth="0.6"/>
-        <line x1={tx(x2)} y1={y-3} x2={tx(x2)} y2={y+3} stroke={DIM} strokeWidth="0.6"/>
-        <text x={cx} y={y-3} textAnchor="middle" fontSize="8.5" fill={DIM}>{label}</text>
+        <line x1={tx(x1)} y1={y-4} x2={tx(x1)} y2={y+4} stroke={DIM} strokeWidth="0.8"/>
+        <line x1={tx(x2)} y1={y-4} x2={tx(x2)} y2={y+4} stroke={DIM} strokeWidth="0.8"/>
+        <text x={cx} y={y-4} textAnchor="middle" fontSize="11" fontWeight="600" fill={DIM}>{label}</text>
       </g>
     )
   }
-  const vDim = (xm: number, y1: number, y2: number, label: string, xOff = 14) => {
+  const vDim = (xm: number, y1: number, y2: number, label: string, xOff: number) => {
     const x = tx(xm) + xOff
     const cy = (ty(y1) + ty(y2)) / 2
+    const anchor = xOff < 0 ? 'end' : 'start'
+    const lx = xOff < 0 ? x - 4 : x + 4
     return (
       <g>
-        <line x1={x} y1={ty(y1)} x2={x} y2={ty(y2)} stroke={DIM} strokeWidth="0.8"
+        <line x1={x} y1={ty(y1)} x2={x} y2={ty(y2)} stroke={DIM} strokeWidth="1"
           markerStart="url(#bR)" markerEnd="url(#bF)"/>
-        <line x1={x-3} y1={ty(y1)} x2={x+3} y2={ty(y1)} stroke={DIM} strokeWidth="0.6"/>
-        <line x1={x-3} y1={ty(y2)} x2={x+3} y2={ty(y2)} stroke={DIM} strokeWidth="0.6"/>
-        <text x={x+3} y={cy+3} fontSize="8.5" fill={DIM}>{label}</text>
+        <line x1={x-4} y1={ty(y1)} x2={x+4} y2={ty(y1)} stroke={DIM} strokeWidth="0.8"/>
+        <line x1={x-4} y1={ty(y2)} x2={x+4} y2={ty(y2)} stroke={DIM} strokeWidth="0.8"/>
+        <text x={lx} y={cy+4} textAnchor={anchor} fontSize="11" fontWeight="600" fill={DIM}>{label}</text>
       </g>
     )
   }
 
-  // 말뚝 배치 — 기초 하면 아래로
-  // 편람 역T형: 말뚝은 기초판 하면에서 시작, 등간격 배치
   const pileDia_m = soil.pileDia / 1000
-  const pileYbot  = -(pileDisplayLen * 0.85)  // 표시 깊이
+  const pileYbot  = -(pileDisplayLen * 0.82)
   const pileXs: number[] = []
   if (foundType === 'pile') {
     const n = soil.pileN
-    // 기초 중앙 기준으로 등간격
     const center = g.footWidth / 2
     for (let i = 0; i < n; i++) {
       pileXs.push(center + (i - (n - 1) / 2) * soil.pileSpacing)
@@ -831,124 +791,94 @@ function InvertedTDiagram({ g, soil, foundType }: { g: InvertedTGeom; soil: Soil
     <svg width="100%" viewBox={`0 0 ${SVG_W} ${SVG_H}`}
       style={{ fontFamily: 'JetBrains Mono, monospace', background: '#fff', display: 'block' }}>
       <defs>
-        <marker id="bF" markerWidth="5" markerHeight="5" refX="5" refY="2.5" orient="auto">
-          <path d="M0,0 L5,2.5 L0,5 Z" fill={DIM}/>
+        <marker id="bF" markerWidth="6" markerHeight="6" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L6,3 L0,6 Z" fill={DIM}/>
         </marker>
-        <marker id="bR" markerWidth="5" markerHeight="5" refX="0" refY="2.5" orient="auto">
-          <path d="M5,0 L0,2.5 L5,5 Z" fill={DIM}/>
+        <marker id="bR" markerWidth="6" markerHeight="6" refX="0" refY="3" orient="auto">
+          <path d="M6,0 L0,3 L6,6 Z" fill={DIM}/>
         </marker>
-        <pattern id="hatchB" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
-          <line x1="0" y1="0" x2="0" y2="6" stroke="#8b6914" strokeWidth="1" strokeOpacity="0.45"/>
+        <pattern id="hatchB" patternUnits="userSpaceOnUse" width="7" height="7" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="7" stroke="#8b6914" strokeWidth="1.2" strokeOpacity="0.5"/>
         </pattern>
       </defs>
 
-      {/* 제목 */}
-      <text x={SVG_W/2} y={18} textAnchor="middle" fontSize="11" fontWeight="700" fill="#1e2a3a">
-        역T형 교대 단면도
-      </text>
-      <text x={SVG_W/2} y={30} textAnchor="middle" fontSize="8" fill="#777">
+      <text x={SVG_W/2} y={20} textAnchor="middle" fontSize="13" fontWeight="700" fill="#1e2a3a">역T형 교대 단면도</text>
+      <text x={SVG_W/2} y={35} textAnchor="middle" fontSize="10" fill="#666">
         {foundType === 'pile' ? '(말뚝기초 / 단위 : m)' : '(직접기초 / 단위 : m)'}
       </text>
 
-      {/* 말뚝 (본체보다 먼저 그려 본체 뒤에 위치) */}
+      {/* 말뚝 */}
       {foundType === 'pile' && pileXs.map((px, i) => (
         <g key={i}>
-          <rect
-            x={tx(px - pileDia_m/2)} y={ty(0)}
-            width={Math.max(pileDia_m * SX, 4)} height={ty(pileYbot) - ty(0)}
+          <rect x={tx(px-pileDia_m/2)} y={ty(0)} width={Math.max(pileDia_m*SX,5)} height={ty(pileYbot)-ty(0)}
             fill="#b8c8df" stroke="#1a56b0" strokeWidth="1.2"/>
-          <line
-            x1={tx(px - pileDia_m/2) - 2} y1={ty(pileYbot)}
-            x2={tx(px + pileDia_m/2) + 2} y2={ty(pileYbot)}
-            stroke="#1a56b0" strokeWidth="2"/>
+          <line x1={tx(px-pileDia_m/2)-2} y1={ty(pileYbot)} x2={tx(px+pileDia_m/2)+2} y2={ty(pileYbot)}
+            stroke="#1a56b0" strokeWidth="2.5"/>
         </g>
       ))}
 
-      {/* 지반 (직접기초) */}
+      {/* 지반 */}
       {foundType === 'spread' && (
         <>
-          <rect x={tx(xCapL)-2} y={ty(0)} width={tx(xCapR)+4-tx(xCapL)} height={18}
-            fill="url(#hatchB)" opacity={0.5}/>
-          <line x1={tx(xCapL)-2} y1={ty(0)} x2={tx(xCapR)+2} y2={ty(0)} stroke="#6b4f1a" strokeWidth="1.5"/>
+          <rect x={tx(xCapL)-2} y={ty(0)} width={tx(xCapR)-tx(xCapL)+4} height={20} fill="url(#hatchB)" opacity={0.5}/>
+          <line x1={tx(xCapL)-2} y1={ty(0)} x2={tx(xCapR)+2} y2={ty(0)} stroke="#6b4f1a" strokeWidth="2"/>
         </>
       )}
-      {/* 말뚝기초 — 지반선 */}
       {foundType === 'pile' && (
-        <line x1={tx(xCapL)-2} y1={ty(0)} x2={tx(xCapR)+2} y2={ty(0)} stroke="#6b4f1a" strokeWidth="1.5" strokeDasharray="4,3"/>
+        <line x1={tx(xCapL)-2} y1={ty(0)} x2={tx(xCapR)+2} y2={ty(0)} stroke="#6b4f1a" strokeWidth="1.5" strokeDasharray="5,3"/>
       )}
 
-      {/* 뒤채움 (G.L. 위, 줄기 후면~뒷굽 끝) */}
-      <rect
-        x={tx(xStemTopR)} y={ty(yBwTop)}
-        width={tx(xCapR) - tx(xStemTopR)}
-        height={ty(yFoot) - ty(yBwTop)}
-        fill="url(#hatchB)" opacity={0.55}/>
+      {/* 뒤채움 */}
+      <rect x={tx(xStemTopR)} y={ty(yStemTop)} width={tx(xCapR)-tx(xStemTopR)} height={ty(yCapTop)-ty(yStemTop)}
+        fill="url(#hatchB)" opacity={0.5}/>
 
-      {/* G.L. 선 */}
-      <line x1={tx(xStemTopR)-2} y1={ty(yStemTop)} x2={tx(xCapR)+24} y2={ty(yStemTop)}
-        stroke="#6b4f1a" strokeWidth="1.2" strokeDasharray="5,3"/>
-      <text x={tx(xCapR)+26} y={ty(yStemTop)+4} fontSize="8" fill="#6b4f1a">G.L.</text>
+      {/* G.L. */}
+      <line x1={tx(xStemTopR)-2} y1={ty(yStemTop)} x2={tx(xCapR)+28} y2={ty(yStemTop)}
+        stroke="#555" strokeWidth="1.2" strokeDasharray="6,3"/>
+      <text x={tx(xCapR)+30} y={ty(yStemTop)+4} fontSize="10" fontWeight="600" fill="#555">G.L.</text>
 
       {/* 교대 본체 */}
-      <polygon points={polyBody} fill={FILL} stroke={STROKE} strokeWidth="1.8" strokeLinejoin="miter"/>
+      <polygon points={polyBody} fill={FILL} stroke={STROKE} strokeWidth="2" strokeLinejoin="miter"/>
+      <line x1={tx(xCapL)} y1={ty(0)} x2={tx(xCapR)} y2={ty(0)} stroke={STROKE} strokeWidth="2.5"/>
 
-      {/* 기초 하면선 (강조) */}
-      <line x1={tx(xCapL)} y1={ty(0)} x2={tx(xCapR)} y2={ty(0)} stroke={STROKE} strokeWidth="2"/>
+      {/* 교좌장치 */}
+      <rect x={tx(xBwL)+2} y={ty(yBwTop)-13} width={Math.max(g.backwallThick*SX-4,6)} height={11}
+        fill="#6c8ebf" stroke="#3b5998" strokeWidth="1" rx="1"/>
 
-      {/* 교좌 장치 */}
-      <rect
-        x={tx(xBwL)+3} y={ty(yBwTop)-11}
-        width={Math.max(g.backwallThick * SX - 6, 4)} height={9}
-        fill="#6c8ebf" stroke="#3b5998" strokeWidth="0.9" rx="1"/>
-      <text x={tx((xBwL+xBwR)/2)} y={ty(yBwTop)-13}
-        fontSize="7" fill="#3b5998" textAnchor="middle">교좌</text>
+      {hDim(xCapL, xCapR, 0, `${g.footWidth.toFixed(3)}`, ty(0)+42)}
+      {hDim(xCapL, xHaunchL, yCapTop, `${g.footToe.toFixed(3)}`)}
+      {hDim(xHaunchL, xStemBotL, yHaunchTop, `${g.haunchW.toFixed(3)}`)}
+      {hDim(xStemBotL, xStemBotR, yHaunchTop, `${g.stemBotW.toFixed(3)}`)}
+      {hDim(xStemBotR, xHaunchR, yHaunchTop, `${g.haunchW.toFixed(3)}`)}
+      {hDim(xHaunchR, xCapR, yCapTop, `${g.footHeel.toFixed(3)}`)}
+      {hDim(xStemTopL, xStemTopR, yStemTop, `${g.stemTopW.toFixed(3)}`, -16)}
+      {hDim(xBwL, xBwR, yBwTop, `${g.backwallThick.toFixed(3)}`, -16)}
 
-      {/* ── 폭 치수 ── */}
-      {/* 전체 기초폭 */}
-      {hDim(xCapL, xCapR, 0, `B=${g.footWidth.toFixed(2)}`, ty(0)+32)}
-      {/* 앞굽 */}
-      {hDim(xCapL, xStemL, yFoot, `L₁=${g.footToe.toFixed(2)}`)}
-      {/* 줄기 폭 */}
-      {hDim(xStemL, xStemR, yFoot, `${g.stemBotW.toFixed(2)}`)}
-      {/* 뒷굽 */}
-      {hDim(xStemR, xCapR, yFoot, `L₂=${g.footHeel.toFixed(2)}`)}
-      {/* 흉벽 */}
-      {hDim(xBwL, xBwR, yBwTop, `${g.backwallThick.toFixed(2)}`, -13)}
+      {vDim(xCapR, 0, yCapTop, `${g.footH.toFixed(3)}`, 14)}
+      {vDim(xCapR, yCapTop, yHaunchTop, `${g.haunchH.toFixed(3)}`, 14)}
+      {vDim(xCapR, yHaunchTop, yStemTop, `${g.stemH.toFixed(3)}`, 14)}
+      {vDim(xCapR, yStemTop, yBwTop, `${g.backwallH.toFixed(3)}`, 14)}
+      {vDim(xCapL, 0, yBwTop, `${(g.footH+g.haunchH+g.stemH+g.backwallH).toFixed(3)}`, -66)}
 
-      {/* ── 높이 치수 (우측) ── */}
-      {vDim(xCapR, 0, yFoot, `t=${g.footH.toFixed(2)}`)}
-      {vDim(xCapR, yFoot, yStemTop, `H=${g.stemH.toFixed(2)}`)}
-      {vDim(xCapR, yStemTop, yBwTop, `h=${g.backwallH.toFixed(2)}`)}
-
-      {/* 좌측 전체 높이 */}
-      {vDim(xCapL, 0, yBwTop, `${(g.footH+g.stemH+g.backwallH).toFixed(2)}`, -52)}
-
-      {/* 말뚝 길이 치수 */}
       {foundType === 'pile' && pileXs.length > 0 && (
         <g>
-          <line x1={tx(xCapR)+32} y1={ty(0)} x2={tx(xCapR)+32} y2={ty(pileYbot)}
-            stroke={DIM} strokeWidth="0.8" markerStart="url(#bR)" markerEnd="url(#bF)"/>
-          <text x={tx(xCapR)+36} y={(ty(0)+ty(pileYbot))/2+3} fontSize="8.5" fill={DIM}>
+          <line x1={tx(xCapR)+34} y1={ty(0)} x2={tx(xCapR)+34} y2={ty(pileYbot)}
+            stroke={DIM} strokeWidth="1" markerStart="url(#bR)" markerEnd="url(#bF)"/>
+          <text x={tx(xCapR)+38} y={(ty(0)+ty(pileYbot))/2+4} fontSize="11" fontWeight="600" fill={DIM}>
             L={soil.pileLen}m
           </text>
         </g>
       )}
-      {/* 말뚝 직경 라벨 */}
       {foundType === 'pile' && pileXs.length > 0 && (
-        <text x={tx(pileXs[0])} y={ty(pileYbot)+12}
-          textAnchor="middle" fontSize="7" fill="#1a56b0">
-          φ{soil.pileDia}
+        <text x={tx(pileXs[0])} y={ty(pileYbot)+13} textAnchor="middle" fontSize="9" fill="#1a56b0">
+          {'\u03c6'}{soil.pileDia}
         </text>
       )}
 
-      {/* 기준선 텍스트 */}
-      <text x={PAD.l} y={SVG_H-8} fontSize="7" fill="#aaa">
-        도로설계편람 교량편 / KDS 11 50 20
-      </text>
+      <text x={PAD.l} y={SVG_H-8} fontSize="8" fill="#bbb">도로설계편람 교량편 / KDS 11 50 20</text>
     </svg>
   )
 }
-
 // ════ 공통 스타일 ════════════════════════════════════════════════
 const S = {
   label: { fontSize: '0.72rem', color: 'var(--text-3)', fontFamily: 'var(--font-mono)', marginBottom: '2px' } as React.CSSProperties,
