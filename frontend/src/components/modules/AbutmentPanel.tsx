@@ -123,10 +123,10 @@ interface AbutMat {
 const DEF_SG: SemiGravityGeom = {
   topWidth: 4.600,
   backwallH: 1.500, backwallThick: 0.400, bearingPadW: 0.550,
-  stemH: 6.000, stemTopW: 1.500, stemBotW: 3.500,
+  stemH: 3.500, stemTopW: 1.000, stemBotW: 1.600,
   frontStepH: 1.000, frontStepW: 0.400,
   footH: 1.000, footToe: 1.000, footHeel: 1.800, footWidth: 4.600,
-  backStepH: 1.400, backStepW: 0.200,
+  backStepH: 1.000, backStepW: 0.200,
   unitWidth: 1.0,
 }
 const DEF_IT: InvertedTGeom = {
@@ -541,195 +541,163 @@ function calcAbutIT(it: InvertedTGeom, mat: AbutMat, soil: SoilParam, load: Abut
 //   ⑥ 뒤채움: 줄기 후면(xStemR) ~ 뒷굽 우단(xFootR), G.L.~기초 상면
 // ════════════════════════════════════════════════════════════════════
 function SemiGravityDiagram({ g }: { g: SemiGravityGeom }) {
-  // ── 편람 반중력식 삽도 형상 ──
-  // 좌=전면(앞굽), 우=후면(뒷굽+뒤채움)
-  // 줄기 후면은 수직, 전면은 위로 갈수록 오른쪽(후면방향)으로 경사
-  // 흉벽은 줄기 상단 우측(후면)에 위치
-  // 전면계단: 기초 앞굽 좌측에서 위로 돌출
+  // ═══════════════════════════════════════════════════════════
+  // 도로설계편람 반중력식 교대 삽도 - 원본 그대로
   //
-  // 편람 치수 예: 기초폭=4.600, 앞굽=1.000, 줄기하단=1.600, 뒷굽=1.800+0.200(돌출)
-  //              줄기높이=6.000, 상단폭=1.500(흉벽0.400포함), 흉벽높이=1.500
-  //              전면계단: 폭0.400, 높이1.000
+  // 편람 좌표계: x=0 기초 전면 좌단, y=0 기초 하면
+  // 좌=전면(도로), 우=후면(성토)
+  //
+  // 편람 치수:
+  //   기초 하단: 앞굽1.000 + 줄기하단1.600 + 뒷굽1.800 + 돌출0.200 = 4.600
+  //   기초 높이: 1.000
+  //   줄기 높이: 3.500  (기초 상면 ~ 줄기 상단)
+  //   줄기 후면: 수직 (x=2.600 고정)
+  //   줄기 전면: 경사 (하단 x=1.000 → 상단 x=1.650)
+  //   줄기 상단폭: 0.950 = 교좌영역0.550 + 흉벽0.400
+  //   흉벽: 폭0.400 × 높이1.500, 줄기 상단 후면(우측)에 위치
+  //   전면 계단: 폭0.400 × 높이1.000, 기초 상면 좌측 돌출
+  //   후면 하단 돌출: 폭0.200 × 높이1.000 (기초 우하단)
+  // ═══════════════════════════════════════════════════════════
 
-  const SVG_W = 560, SVG_H = 540
-  const PAD = { l: 90, r: 72, t: 58, b: 62 }
+  const SVG_W = 560, SVG_H = 560
+  const PAD = { l: 100, r: 90, t: 55, b: 72 }
   const DW = SVG_W - PAD.l - PAD.r
   const DH = SVG_H - PAD.t - PAD.b
 
-  const totalH_m = g.footH + g.stemH + g.backwallH + 0.6
-  const totalW_m = g.footWidth + 0.5
-  const SX = DW / totalW_m
-  const SY = DH / totalH_m
+  const W_m = g.footWidth + g.backStepW + 0.4
+  const H_m = g.footH + g.stemH + g.backwallH + 0.6
+  const SX = DW / W_m
+  const SY = DH / H_m
 
   const ox = PAD.l
   const oy = PAD.t + DH
-  const tx = (xm: number) => ox + xm * SX
-  const ty = (ym: number) => oy - ym * SY
+  const px = (xm: number) => ox + xm * SX
+  const py = (ym: number) => oy - ym * SY
 
-  // 높이 레벨
-  const yFoot    = g.footH
-  const yStemTop = yFoot + g.stemH
-  const yBwTop   = yStemTop + g.backwallH
+  // y 레벨
+  const Y0   = 0                           // 기초 하면
+  const Y1   = g.footH                     // 기초 상면
+  const Y2   = Y1 + g.frontStepH          // 계단 상단
+  const Y3   = Y1 + g.stemH               // 줄기 상단 = 흉벽 하면
+  const Y4   = Y3 + g.backwallH           // 흉벽 상단
+  const Ybd  = g.backStepH               // 후면돌출 상단 (y=0 기준)
 
-  // ── X 좌표 정의 ──
-  // 기초판
-  const xFootL = 0               // 앞굽 좌단
-  const xFootR = g.footWidth     // 뒷굽 우단
+  // x 좌표
+  const X0   = 0                           // 기초 전면 좌단
+  const X1   = g.footToe                   // 앞굽 우단 = 줄기 전면 하단
+  const X2   = X1 + g.stemBotW            // 줄기 후면 (수직)
+  const X3   = X2 + g.footHeel            // 뒷굽 우단
+  const X4   = X3 + g.backStepW           // 후면 돌출 우단
+  const XsL  = X1 - g.frontStepW          // 계단 좌단
+  const XstL = X2 - g.stemTopW            // 줄기 상단 전면 (경사 끝)
+  const XbwR = X2                          // 흉벽 후면 = 줄기 후면
+  const XbwL = XbwR - g.backwallThick     // 흉벽 전면
 
-  // 줄기 하단 전면 = 앞굽폭
-  const xStemBotL = g.footToe
-
-  // 줄기 후면 (수직) = 앞굽 + 줄기하단폭
-  // 편람에서 기초 하단: 앞굽1.000 + 줄기폭1.600 + 뒷굽1.800 = 4.400
-  // 그러나 footWidth=4.600이면 footHeel = footWidth - footToe - stemBotW
-  const xStemBotR = g.footToe + g.stemBotW   // 줄기 하단 후면 = 줄기 후면 (상하동일, 수직)
-  const xStemR    = xStemBotR                 // alias
-
-  // 줄기 상단 전면:
-  // 편람에서 줄기 상단폭(흉벽포함) = 1.500, 흉벽폭 = 0.400
-  // 줄기 상단 전면은 경사로 후면방향으로 이동:
-  // xStemTopL = xStemBotL + (stemBotW - stemTopW)
-  // 즉 하단에서 상단으로 갈수록 전면이 우측으로 이동 → 왼쪽 경사면
-  const xStemTopL = xStemBotL + (g.stemBotW - g.stemTopW)
-  // 줄기 상단 후면 = 줄기 후면 (수직)
-  const xStemTopR = xStemR
-
-  // 흉벽: 줄기 상단 후면(우측)에 위치
-  // xBwR = 줄기 후면 = xStemR
-  // xBwL = xBwR - backwallThick
-  const xBwR = xStemR
-  const xBwL = xBwR - g.backwallThick
-
-  // 전면 계단: 기초 상면에서 앞굽 좌측으로 frontStepW 돌출
-  // 계단 좌단 = footToe - frontStepW
-  // (편람에서 기초 앞굽=1.000, 계단폭=0.400이면 계단좌단 = 0.600)
-  const xStepL   = g.footToe - g.frontStepW
-  const yStepTop = yFoot + g.frontStepH
-
-  // 후면 돌출: 줄기 후면 우측으로 backStepW
-  const xBackR   = xStemR + g.backStepW
-  const yBackTop = yFoot + g.backStepH
-
-  // ── 단면 폴리곤 ──
-  // 편람 형상: 좌하→우하→우상(뒷굽)→후면돌출→줄기후면상단→흉벽→줄기상단전면→경사→계단→좌상→좌하
-  const pts: [number, number][] = [
-    [xFootL,    0],          // ① 기초 하면 좌
-    [xFootR,    0],          // ② 기초 하면 우
-    [xFootR,    yFoot],      // ③ 뒷굽 상면 우
-    [xBackR,    yFoot],      // ④ 후면돌출 하단 우
-    [xBackR,    yBackTop],   // ⑤ 후면돌출 상단 우
-    [xStemR,    yBackTop],   // ⑥ 후면돌출 상단 좌 (줄기 후면)
-    [xStemR,    yStemTop],   // ⑦ 줄기 후면 상단 (수직)
-    [xBwR,      yStemTop],   // ⑧ 흉벽 후면 하단 (=⑦, xBwR=xStemR)
-    [xBwR,      yBwTop],     // ⑨ 흉벽 후면 상단
-    [xBwL,      yBwTop],     // ⑩ 흉벽 전면 상단
-    [xBwL,      yStemTop],   // ⑪ 흉벽 전면 하단
-    [xStemTopL, yStemTop],   // ⑫ 줄기 상단 전면 (경사 상단)
-    [xStemBotL, yStepTop],   // ⑬ 경사 하단 = 계단 우상단
-    [xStepL,    yStepTop],   // ⑭ 계단 좌상단
-    [xStepL,    yFoot],      // ⑮ 계단 좌하단 (기초 상면)
-    [xFootL,    yFoot],      // ⑯ 앞굽 상면 좌
+  // 폴리곤 꼭짓점 (편람 형상 그대로)
+  const pts: [number,number][] = [
+    [X0,   Y0],   // 기초 하면 좌
+    [X3,   Y0],   // 기초 하면 우 (뒷굽끝)
+    [X4,   Y0],   // 후면돌출 하면 우
+    [X4,   Ybd],  // 후면돌출 상단 우
+    [X3,   Ybd],  // 후면돌출 상단 좌
+    [X3,   Y1],   // 뒷굽 상면 우
+    [X2,   Y1],   // 줄기 후면 기초 상면
+    [X2,   Y3],   // 줄기 후면 상단 (수직)
+    [XbwR, Y3],   // 흉벽 후면 하단 (= 줄기 후면 상단)
+    [XbwR, Y4],   // 흉벽 후면 상단
+    [XbwL, Y4],   // 흉벽 전면 상단
+    [XbwL, Y3],   // 흉벽 전면 하단
+    [XstL, Y3],   // 줄기 상단 전면 (경사 최상단)
+    [X1,   Y2],   // 경사 하단 = 계단 우상단
+    [XsL,  Y2],   // 계단 좌상단
+    [XsL,  Y1],   // 계단 좌하단
+    [X0,   Y1],   // 기초 상면 좌
   ]
-  const polyStr = pts.map(([x, y]) => `${tx(x).toFixed(1)},${ty(y).toFixed(1)}`).join(' ')
+  const bodyStr = pts.map(([x,y]) => `${px(x).toFixed(1)},${py(y).toFixed(1)}`).join(' ')
 
-  const DIM = '#1a56b0'
-  const FILL = '#dce8f5'
-  const STROKE = '#1e3a6e'
+  const DIM = '#1a56b0', FILL = '#dce8f5', STROKE = '#1e3a6e'
 
-  const hDim = (x1: number, x2: number, ym: number, label: string, yOff = -15) => {
-    const y = ty(ym) + yOff
-    const cx = (tx(x1) + tx(x2)) / 2
-    return (
-      <g>
-        <line x1={tx(x1)} y1={y} x2={tx(x2)} y2={y} stroke={DIM} strokeWidth="1.1"
-          markerStart="url(#aR)" markerEnd="url(#aF)"/>
-        <line x1={tx(x1)} y1={y-5} x2={tx(x1)} y2={y+5} stroke={DIM} strokeWidth="1"/>
-        <line x1={tx(x2)} y1={y-5} x2={tx(x2)} y2={y+5} stroke={DIM} strokeWidth="1"/>
-        <text x={cx} y={y-5} textAnchor="middle" fontSize="12" fontWeight="600" fill={DIM}>{label}</text>
-      </g>
-    )
+  const hd = (x1: number, x2: number, ysvg: number, lbl: string) => {
+    const cx = (px(x1)+px(x2))/2
+    return (<g key={`h${lbl}`}>
+      <line x1={px(x1)} y1={ysvg} x2={px(x2)} y2={ysvg} stroke={DIM} strokeWidth="1"
+        markerStart="url(#sgR)" markerEnd="url(#sgF)"/>
+      <text x={cx} y={ysvg-3} textAnchor="middle" fontSize="11" fill={DIM} fontWeight="600">{lbl}</text>
+    </g>)
   }
-  const vDim = (xm: number, y1: number, y2: number, label: string, xOff: number) => {
-    const x = tx(xm) + xOff
-    const cy = (ty(y1) + ty(y2)) / 2
-    const anchor = xOff < 0 ? 'end' : 'start'
-    const lx = xOff < 0 ? x - 5 : x + 5
-    return (
-      <g>
-        <line x1={x} y1={ty(y1)} x2={x} y2={ty(y2)} stroke={DIM} strokeWidth="1.1"
-          markerStart="url(#aR)" markerEnd="url(#aF)"/>
-        <line x1={x-5} y1={ty(y1)} x2={x+5} y2={ty(y1)} stroke={DIM} strokeWidth="1"/>
-        <line x1={x-5} y1={ty(y2)} x2={x+5} y2={ty(y2)} stroke={DIM} strokeWidth="1"/>
-        <text x={lx} y={cy+4} textAnchor={anchor} fontSize="12" fontWeight="600" fill={DIM}>{label}</text>
-      </g>
-    )
+  const vd = (xsvg: number, y1: number, y2: number, lbl: string, side: 'L'|'R') => {
+    const cy = (py(y1)+py(y2))/2
+    const anchor = side==='L' ? 'end' : 'start'
+    const tx2 = xsvg + (side==='L' ? -6 : 6)
+    return (<g key={`v${lbl}`}>
+      <line x1={xsvg} y1={py(y1)} x2={xsvg} y2={py(y2)} stroke={DIM} strokeWidth="1"
+        markerStart="url(#sgR)" markerEnd="url(#sgF)"/>
+      <text x={tx2} y={cy+4} textAnchor={anchor} fontSize="11" fill={DIM} fontWeight="600">{lbl}</text>
+    </g>)
   }
 
   return (
     <svg width="100%" viewBox={`0 0 ${SVG_W} ${SVG_H}`}
-      style={{ fontFamily: 'JetBrains Mono, monospace', background: '#fff', display: 'block' }}>
+      style={{fontFamily:'JetBrains Mono,monospace', background:'#fff', display:'block'}}>
       <defs>
-        <marker id="aF" markerWidth="7" markerHeight="7" refX="7" refY="3.5" orient="auto">
-          <path d="M0,0 L7,3.5 L0,7 Z" fill={DIM}/>
+        <marker id="sgF" markerWidth="6" markerHeight="6" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L6,3 L0,6 Z" fill={DIM}/>
         </marker>
-        <marker id="aR" markerWidth="7" markerHeight="7" refX="0" refY="3.5" orient="auto">
-          <path d="M7,0 L0,3.5 L7,7 Z" fill={DIM}/>
+        <marker id="sgR" markerWidth="6" markerHeight="6" refX="0" refY="3" orient="auto">
+          <path d="M6,0 L0,3 L6,6 Z" fill={DIM}/>
         </marker>
-        <pattern id="hatch" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(45)">
-          <line x1="0" y1="0" x2="0" y2="8" stroke="#8b6914" strokeWidth="1.4" strokeOpacity="0.5"/>
+        <pattern id="sgH" patternUnits="userSpaceOnUse" width="7" height="7" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="7" stroke="#8b6914" strokeWidth="1.4" strokeOpacity="0.5"/>
         </pattern>
       </defs>
 
       <text x={SVG_W/2} y={22} textAnchor="middle" fontSize="14" fontWeight="700" fill="#1e2a3a">반중력식 교대 단면도</text>
-      <text x={SVG_W/2} y={37} textAnchor="middle" fontSize="10" fill="#666">(단위 : m)</text>
+      <text x={SVG_W/2} y={36} textAnchor="middle" fontSize="10" fill="#888">(단위 : m)</text>
 
       {/* 기초 하부 지반 */}
-      <rect x={tx(xFootL)-2} y={ty(0)} width={tx(xFootR)-tx(xFootL)+4} height={22}
-        fill="url(#hatch)" opacity={0.5}/>
-      <line x1={tx(xFootL)-2} y1={ty(0)} x2={tx(xFootR)+2} y2={ty(0)} stroke="#6b4f1a" strokeWidth="2"/>
+      <rect x={px(X0)} y={py(Y0)} width={px(X4)-px(X0)} height={18} fill="url(#sgH)" opacity="0.6"/>
+      <line x1={px(X0)} y1={py(Y0)} x2={px(X4)} y2={py(Y0)} stroke="#6b4f1a" strokeWidth="2"/>
 
-      {/* 뒤채움: 줄기 후면(xStemR)~뒷굽(xFootR), G.L.(yStemTop)~기초상면(yFoot) */}
-      <rect x={tx(xStemR)} y={ty(yStemTop)}
-        width={tx(xFootR) - tx(xStemR)}
-        height={ty(yFoot) - ty(yStemTop)}
-        fill="url(#hatch)" opacity={0.5}/>
+      {/* 뒤채움: 줄기후면~뒷굽, 기초상면~줄기상단 */}
+      <rect x={px(X2)} y={py(Y3)} width={px(X3)-px(X2)} height={py(Y1)-py(Y3)} fill="url(#sgH)" opacity="0.5"/>
 
       {/* G.L. */}
-      <line x1={tx(xStemR)-4} y1={ty(yStemTop)} x2={tx(xFootR)+32} y2={ty(yStemTop)}
-        stroke="#555" strokeWidth="1.3" strokeDasharray="7,4"/>
-      <text x={tx(xFootR)+34} y={ty(yStemTop)+5} fontSize="11" fontWeight="700" fill="#555">G.L.</text>
+      <line x1={px(X2)-4} y1={py(Y3)} x2={px(X4)+28} y2={py(Y3)} stroke="#555" strokeWidth="1.3" strokeDasharray="7,4"/>
+      <text x={px(X4)+30} y={py(Y3)+4} fontSize="11" fontWeight="700" fill="#555">G.L.</text>
 
       {/* 교대 본체 */}
-      <polygon points={polyStr} fill={FILL} stroke={STROKE} strokeWidth="2.2" strokeLinejoin="miter"/>
+      <polygon points={bodyStr} fill={FILL} stroke={STROKE} strokeWidth="2.2" strokeLinejoin="miter"/>
 
-      {/* 교좌장치 블록 (흉벽 상면) */}
-      <rect x={tx(xBwL)+2} y={ty(yBwTop)-14}
-        width={Math.max(g.backwallThick*SX-4, 8)} height={12}
+      {/* 교좌장치 */}
+      <rect x={px(XbwL)+1} y={py(Y4)-11} width={Math.max((XbwR-XbwL)*SX-2,4)} height={9}
         fill="#6c8ebf" stroke="#3b5998" strokeWidth="1.2" rx="1"/>
 
-      {/* 폭 치수 */}
-      {hDim(xFootL, xFootR, 0, `${g.footWidth.toFixed(3)}`, ty(0)+46)}
-      {hDim(xFootL, xStemBotL, yFoot, `${g.footToe.toFixed(3)}`)}
-      {hDim(xStemBotL, xStemBotR, yFoot, `${g.stemBotW.toFixed(3)}`)}
-      {hDim(xStemBotR, xFootR, yFoot, `${g.footHeel.toFixed(3)}`)}
-      {hDim(xStemTopL, xStemTopR, yStemTop, `${g.stemTopW.toFixed(3)}`, -17)}
-      {hDim(xBwL, xBwR, yBwTop, `${g.backwallThick.toFixed(3)}`, -17)}
-      {hDim(xStepL, xStemBotL, yStepTop, `${g.frontStepW.toFixed(3)}`, -16)}
+      {/* 상단 수평 치수 */}
+      {hd(X0,   X4,   py(Y4)-34, `${(g.footWidth+g.backStepW).toFixed(3)}`)}
+      {hd(X1,   XstL, py(Y3)-18, `${(XstL-X1).toFixed(3)}`)}
+      {hd(XbwL, XbwR, py(Y4)-18, `${g.backwallThick.toFixed(3)}`)}
 
-      {/* 우측 높이 치수 */}
-      {vDim(xFootR, 0, yFoot, `${g.footH.toFixed(3)}`, 16)}
-      {vDim(xFootR, yFoot, yStemTop, `${g.stemH.toFixed(3)}`, 16)}
-      {vDim(xFootR, yStemTop, yBwTop, `${g.backwallH.toFixed(3)}`, 16)}
+      {/* 기초 하단 수평 치수 */}
+      {hd(X0,  X1,  py(Y0)+26, `${g.footToe.toFixed(3)}`)}
+      {hd(X1,  X2,  py(Y0)+26, `${g.stemBotW.toFixed(3)}`)}
+      {hd(X2,  X3,  py(Y0)+26, `${g.footHeel.toFixed(3)}`)}
+      {hd(X3,  X4,  py(Y0)+26, `${g.backStepW.toFixed(3)}`)}
+      {hd(X0,  X3,  py(Y0)+42, `${g.footWidth.toFixed(3)}`)}
 
-      {/* 좌측 높이 치수 */}
-      {vDim(xFootL, yFoot, yStepTop, `${g.frontStepH.toFixed(3)}`, -54)}
-      {vDim(xFootL, 0, yStemTop, `${(g.footH+g.stemH).toFixed(3)}`, -70)}
+      {/* 좌측 수직 치수 */}
+      {vd(px(X0)-30, Y1, Y2, `${g.frontStepH.toFixed(3)}`, 'L')}
+      {vd(px(X0)-52, Y0, Y3, `${(g.footH+g.stemH).toFixed(3)}`, 'L')}
 
-      <text x={PAD.l} y={SVG_H-10} fontSize="9" fill="#bbb">도로설계편람 교량편 / KDS 11 50 15</text>
+      {/* 우측 수직 치수 */}
+      {vd(px(X4)+16, Y0,  Y1,  `${g.footH.toFixed(3)}`, 'R')}
+      {vd(px(X4)+16, Y1,  Y3,  `${g.stemH.toFixed(3)}`, 'R')}
+      {vd(px(X4)+16, Y3,  Y4,  `${g.backwallH.toFixed(3)}`, 'R')}
+      {vd(px(X4)+38, Y0,  Y4,  `${(g.footH+g.stemH+g.backwallH).toFixed(3)}`, 'R')}
+
+      <text x={PAD.l} y={SVG_H-6} fontSize="9" fill="#ccc">도로설계편람 교량편</text>
     </svg>
   )
 }
-
 function InvertedTDiagram({ g, soil, foundType }: { g: InvertedTGeom; soil: SoilParam; foundType: FoundType }) {
   // ── 편람 역T형 삽도 형상 ──
   // 편람 치수 예: 기초폭=5.900, 앞굽=0.100+0.650=0.750, 뒷굽=0.650+0.100=0.750
